@@ -139,22 +139,40 @@ Vergangenheit" kann nicht eintreten. Wer „20" antwortet, bekommt stattdessen
 „mehr als 10 Zyklen im Voraus" — inhaltlich richtig, aber die
 Vergangenheits-Meldung ist toter Code. Live bestätigt am 01.08.
 
-## Umstiegsplan V2 → V3 (KW 32/33, 2026)
+## Umstiegsplan V2 → V3 (KW 32–37, 2026)
 
-Der Wechsel passiert nicht an einem Tag, sondern in zwei Schritten — mit einer
-Ankündigung dazwischen, damit die Auslos-DMs niemanden unvorbereitet treffen.
-Beides wird **manuell** ausgelöst, die Cron-Trigger bleiben so lange aus.
+Der Wechsel läuft über mehrere Wochen statt an einem Tag. Grund: die ersten beiden
+Augustwochen fallen in den Urlaub, und ein unbeaufsichtigt klemmender DM-Flow wäre
+der schlechteste Einstand. Bis Ende August wird deshalb nur ausgelost, der volle
+Prozess startet im September.
 
-| Wann | Aufruf | Was passiert |
+`monday_cleanup.yml` steht dafür planmäßig auf `draw` statt `weekly` (der Cron läuft
+also ganz normal weiter, nur in einem anderen Modus).
+
+| Wann | Modus | Was passiert |
 |---|---|---|
-| Mo, KW 32 | `python main.py draw` | KW-32-Seite anlegen, mit der neuen Auslosungslogik auf 4 auffüllen, **eine** Kanalnachricht. Keine DMs, kein Reschedule. |
-| ~Mi, KW 32 | Ankündigung von Hand | Was sich mit V3 ändert (Zyklusplanung, DMs, Tausch per ❌). |
-| danach | `python main.py plan` | Zyklus 9 (KW 33–36) nach dem neuen Verfahren, **mit** DMs und Reschedule. |
-| danach | Actions wieder scharf | `monday_cleanup.yml` und `poll_reactions.yml` aktivieren. |
+| Mo, KW 32 (03.08.) | `draw`, manuell | KW-32-Seite anlegen, auf 4 auffüllen, **eine** Kanalnachricht |
+| Mo, KW 33–36 | `draw`, per Cron | jede Woche dasselbe: auffüllen + eine Nachricht, keine DMs |
+| in KW 36 (ab 31.08.) | `plan`, manuell | Zyklus 10 (KW 37–40) nach dem neuen Verfahren, **mit** DMs und Reschedule |
+| davor, von Hand | Ankündigung | Was sich mit V3 ändert (Zyklusplanung, DMs, Tausch per ❌) |
+| ab KW 37 (07.09.) | `weekly` | Workflow zurückstellen, Normalbetrieb |
 
-Wichtig: KW 32 ist die **letzte Woche von Zyklus 8**, `should_plan` ist dort also
-`true`. Ein einfaches `python main.py` würde am Montag zusätzlich Zyklus 9 planen
-und DMs verschicken — deshalb am Montag zwingend `draw` und nicht `weekly`.
+Zwei Fallstricke, die den Fahrplan bestimmen:
+
+1. **`weekly` lost nie aus.** Es ruft nur `remind_current_week` auf, das an bereits
+   Eingetragene erinnert. Ohne geplanten Zyklus existiert für die Woche gar keine
+   Notion-Seite, und dann steigt die Erinnerung vorzeitig aus („keine Notion-Seite —
+   keine Erinnerung verschickt"). Ein Montag im `weekly`-Modus ohne vorherige
+   Zyklusplanung bleibt also komplett stumm und niemand putzt.
+2. **KW 36 ist Zyklusende.** Stünde der Workflow dort schon auf `weekly`, würde zwar
+   Zyklus 10 geplant, KW 36 selbst bliebe aber unbesetzt. Deshalb läuft `draw` eine
+   Woche länger als der Urlaub dauert, und die Planung wird einmalig von Hand
+   angestoßen (Workflow mit `modus = plan` starten).
+
+`poll_reactions.yml` bleibt die ganze Zeit an. Solange es keine Auslos-DMs gibt,
+findet der Lauf keine zukünftigen Wochen und meldet „Nichts zu prüfen" — er ist also
+wirkungslos. Abschalten würde nur das Risiko schaffen, das Wiedereinschalten beim
+`plan`-Lauf zu vergessen; dann liefen alle ❌-Reaktionen unbemerkt ins Leere.
 
 ## Phase 7.1 — Reaktionen vorsetzen ✅
 

@@ -6,7 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 "Putzbot" — a scheduled bot that runs the cleaning-crew ("Putzplan") lottery for a club (das-habitat.de). It reads member and cleaning-schedule data from two linked Notion data sources, draws members to fill upcoming weeks' crews, writes the result back to Notion, and notifies people via Slack. It runs unattended via GitHub Actions (`.github/workflows/monday_cleanup.yml`) on a cron (Mondays 08:00 UTC) or manually via `workflow_dispatch`.
 
-Two scheduled workflows drive production (`monday_cleanup.yml`, `poll_reactions.yml`). Three more are **manual-only and exist for testing**; each hardcodes its safety switches rather than exposing them as inputs, so a misclick cannot reach production:
+Two scheduled workflows drive production (`monday_cleanup.yml`, `poll_reactions.yml`).
+
+⚠️ **`monday_cleanup.yml` is temporarily running `draw` instead of `weekly`** — through KW 36 (2026-08-31), during the V2→V3 changeover. The mode is a literal in the `run:` line, marked `⇦`, alongside the `modus` dispatch input. Both revert to `weekly` from KW 37. Do not "fix" this back without reading the Umstiegsplan in [implementation-plan.md](docs/implementation-plan.md): `weekly` never draws anybody, so switching early leaves weeks with no crew and no message at all.
+
+Three more workflows are **manual-only and exist for testing**; each hardcodes its safety switches rather than exposing them as inputs, so a misclick cannot reach production:
 
 | Workflow | Slack | Notion | Guard |
 |---|---|---|---|

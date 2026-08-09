@@ -7,6 +7,14 @@ on:
     - cron: '0 8 * * 1'
   workflow_dispatch:
     inputs:
+      modus:
+        description: 'Modus für diesen Lauf'
+        type: choice
+        options:
+          - draw
+          - plan
+          - weekly
+        default: draw            # ⇦ Übergangsphase, siehe unten
       dry_run:
         description: 'Dry Run — nichts in Notion/Slack schreiben'
         type: boolean
@@ -46,6 +54,19 @@ jobs:
       - name: Tests
         run: python tests.py
 
+      # ── ÜBERGANGSPHASE bis einschließlich KW 36 (Mo 31.08.2026) ──────────
+      # Planmäßig läuft nur `draw`: die laufende Woche auf 4 auffüllen und eine
+      # Kanalnachricht posten — KEINE DMs und keine Zyklusplanung.
+      #
+      # Hintergrund: `weekly` lost selbst nie aus, es erinnert nur an bereits
+      # Eingetragene. Solange kein Zyklus geplant ist, gäbe es für die Woche gar
+      # keine Notion-Seite und der Lauf bliebe stumm.
+      #
+      # AB KW 37 (07.09.2026) auf 'weekly' zurückstellen — an beiden mit ⇦
+      # markierten Stellen (hier und beim Input `modus` oben).
+      # Davor einmalig Zyklus 10 planen: diesen Workflow von Hand mit
+      # modus = plan starten. Das verschickt die ersten Auslos-DMs.
+      # ─────────────────────────────────────────────────────────────────────
       - name: Skript ausführen
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -57,4 +78,5 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           DEBUG: ${{ inputs.debug }}
           FORCE_PLAN: ${{ inputs.force_plan }}
-        run: python main.py
+        # Bei Cron-Läufen ist `inputs.modus` leer -> der feste Wert greift.
+        run: python main.py ${{ inputs.modus || 'draw' }}   # ⇦
