@@ -141,6 +141,15 @@ Vergangenheits-Meldung ist toter Code. Live bestätigt am 01.08.
 
 ## Umstiegsplan V2 → V3 (KW 32–37, 2026)
 
+> **Stand 01.09.2026 (KW 36):** Die `draw`-Läufe für KW 32–36 sind alle sauber
+> durchgelaufen, jede Woche „Crew voll" mit 4 Leuten. **Noch offen:** die Ankündigung des
+> neuen Prozesses und der einmalige `plan`-Lauf für Zyklus 10 (KW 37–40) — KW 36 ist die
+> Zyklusende-Woche, also wäre jetzt der Zeitpunkt. Der Workflow steht weiterhin fest auf
+> `draw`, es fällt also nichts aus, wenn das später passiert: nächsten Montag wird
+> regulär für KW 37 ausgelost. Da die Ankündigung ohnehin noch aussteht, bietet es sich
+> an, das Erledigt-Tracking (Phase 10) gleich mit einzubauen — dann lernen die Mitglieder
+> einmal um statt zweimal.
+
 Der Wechsel läuft über mehrere Wochen statt an einem Tag. Grund: die ersten beiden
 Augustwochen fallen in den Urlaub, und ein unbeaufsichtigt klemmender DM-Flow wäre
 der schlechteste Einstand. Bis Ende August wird deshalb nur ausgelost, der volle
@@ -208,36 +217,84 @@ wirkungslos. Abschalten würde nur das Risiko schaffen, das Wiedereinschalten be
 - [ ] Danach sind Buttons und Slash-Commands möglich (V3.2/V3.3, siehe [roadmap.md](roadmap.md)) — die gehen per Polling grundsätzlich nicht.
 - [ ] [webhook-setup.md](webhook-setup.md) beschreibt die HTTP-Webhook-Variante. Die ist für diesen Fall vermutlich nicht mehr nötig; das Dokument bleibt als Referenz.
 
-## Idee (nicht gebaut): erfassen, wer tatsächlich geputzt hat
+## Phase 10 — Erledigt-Tracking (entschieden, noch nicht gebaut)
 
 **Das Problem:** `putz_count` zählt **Zuteilungen, keine Erledigungen.** Wer eingetragen
 war und nicht kam, ist im System nicht von jemandem zu unterscheiden, der da war — und
-wird für die Fairness-Rechnung sogar genauso behandelt („hat ja letztens erst"). Der
-Wochenstatus `Erledigt` existiert in Notion, wird aber von nichts gesetzt; `setze_status`
-überschreibt ihn bewusst nie. Im Channel steht dazu schon eine Beschwerde („niemand hat
-abgesagt, nur ich war da").
+wird für die Fairness-Rechnung sogar genauso behandelt („hat ja letztens erst").
 
-**Skizze der naheliegendsten Variante.** Der Montagslauf fragt die Crew der *vergangenen*
-Woche per DM: „Hast du geputzt?", mit vorgesetztem ✅/❌ wie bei der Auslosung. Wer ✅
-klickt, landet in einer neuen Relation `Bestätigt` auf der Wochenseite; ist die Woche
-durch, geht sie auf `Status: Erledigt`.
+### Auslöser: Rückmeldungen aus dem Kanal (31.08./01.09.2026)
 
-Der Reiz daran ist, dass praktisch nichts Neues nötig wäre: Message-Metadata, vorgesetzte
-Reaktionen, der Poll-Lauf und der Mitglieds-Filter aus Phase 5–7.1 tragen das
-unverändert. Dazu kämen im Wesentlichen ein Modus, ein Metadata-Typ und eine
-Notion-Property.
+- **Sven** schlug vor, dass alle, die ihren Dienst geleistet haben, einen Haken unter den
+  Bot-Post setzen; wer nicht konnte, kommt zurück in den Topf. In Ralfs Thread ergänzte
+  er, man solle außerdem in den Thread schreiben, *was* gereinigt wurde — als Lagebild
+  vor Veranstaltungen.
+- **Ralf** wollte wissen, wie er Leute anspricht, die nächste Woche dran sind, wenn erst
+  am Wochenanfang ausgelost wird. Aufgelöst in seiner dritten Antwort: er sucht eine
+  *Vertretung*. Das ist mit V3 doppelt erledigt — die Zyklus-Übersicht nennt alle vier
+  Wochen im Voraus, und per ❌ muss er gar keine Vertretung mehr suchen.
+- Hintergrund ist Uwes Beschwerde vom 24.07. („niemand hat abgesagt, nur ich war da").
 
-**Was dagegen spricht**, und weshalb es bewusst noch nicht gebaut ist:
+**Zwei verschiedene Bedürfnisse, bewusst getrennt behandelt:**
 
-- Es bleibt **Selbstauskunft**. Wer nicht putzt, klickt eher gar nicht als ❌ — und „keine
-  Reaktion" ist nicht dasselbe wie „nicht geputzt".
-- Eine DM mehr pro Person pro Einsatz. Aufmerksamkeit ist die knappe Ressource; wenn der
-  Bot zu oft fragt, reagiert irgendwann niemand mehr — auch nicht auf das Wichtige.
-- Die ausgehängte Liste bleibt ohnehin die belastbarere Quelle. Das hier wäre eine
-  Ergänzung, kein Ersatz.
+| | Was | Form | Lösung |
+|---|---|---|---|
+| A | „Ich habe meinen Dienst gemacht" | strukturiert, pro Person | Reaktion auf die Wochennachricht → Notion |
+| B | „Was wurde geputzt" | Freitext, pro Woche | Thread, **nichts zu bauen** |
 
-Sinnvoll erst zu entscheiden, wenn der normale Ablauf ein paar Zyklen gelaufen ist und
-sich zeigt, ob das Problem in der Praxis groß genug ist.
+B passiert längst von allein — in den Threads stehen Sätze wie „Das Damen WC im EG ist
+geputzt" oder „Teppiche im Flur EG gesaugt, Toilettenpapier nachgefüllt". Der Bot lädt
+das künftig nur explizit ein. Strukturiert (Raum/Tätigkeit) erst mit Formularen nach dem
+Hetzner-Umzug — per Emoji lässt sich das ohnehin nicht ausdrücken.
+
+### Entscheidungen
+
+| Thema | Entscheidung |
+|---|---|
+| Bestätigungsweg | **Reaktion auf die wöchentliche Kanal-Nachricht** (nicht per DM). Die Crew steht zu dem Zeitpunkt längst fest, und der Post ist ohnehin da. Im Nachrichtentext klarstellen, dass die Reaktion nur für die gilt, die diese Woche geputzt haben. |
+| Speicherung | **Eine** Relation. Wer nicht geputzt hat, wird aus `Mitglieder` der Wochenseite ausgetragen; wer zusätzlich geputzt hat, kommt dazu. Nebeneffekt: `putz_count` und Schonfrist korrigieren sich damit von selbst. Preis: „war ausgelost, hat nicht geputzt" ist danach nur noch in Slack sichtbar. |
+| Keine Reaktion | Gilt **vorerst als erledigt** — nur ein explizites ❌ setzt zurück. Langfristig soll die Bestätigung Pflicht werden, mit vorheriger Erinnerung; das wird zusammen mit den Erinnerungen für unbeantwortete Auslos-DMs gebaut (V3.1). |
+| Abgleich | Der Bot vergleicht Reagierende mit Ausgelosten und schreibt bei Abweichung eine PM: an Ausgeloste ohne Reaktion („stimmt das?"), an Reagierende ohne Zuteilung („du warst gar nicht dran — trage ich dich ein?"). Zeitpunkt offen: Mittwoch der Folgewoche oder direkt montags mit der neuen Wochennachricht. |
+| Notion-Rechte | **Kein** read-only. Seiten werden nur *gesperrt* (Bearbeiten erst nach Bestätigung), damit versehentliche Änderungen unwahrscheinlich werden. Read-only erst, wenn es einen Slack-Weg zum freiwilligen Eintragen gibt — sonst fiele genau das weg. Die Rollenverteilung (Slack = handeln, Notion = nachschlagen) kommt in die Ankündigung. |
+
+### Technische Punkte
+
+- **Metadata geht auch im Kanal.** `chat_postMessage(metadata=…)` funktioniert für
+  Kanal-Nachrichten genauso wie für DMs — die Wochennachricht trägt also `{kw, jahr}` mit,
+  es muss nichts aus dem Text zurückgerechnet werden. Auslesen mit
+  `conversations_history(include_all_metadata=True)`.
+- **Neuer Scope `channels:history`** nötig (Produktiv-App hat aktuell 12 Scopes, genau
+  dieser fehlt). App muss neu installiert werden — laut Linus unproblematisch.
+- **Rückweg Slack-ID → Mitglied:** für Ausgeloste ist der Abgleich ein reiner
+  Mengenvergleich (deren Slack-IDs werden ohnehin aufgelöst). Für *unerwartete*
+  Reagierende gezielt `users_info` pro unbekannter ID aufrufen, statt alle ~63 Mitglieder
+  aufzulösen.
+- **Vorbehalt:** die `users`-Liste einer Reaktion kann in `conversations_history` gekürzt
+  sein. Bei dieser Größenordnung unkritisch; `reactions.get` wäre der exakte Weg.
+- ⚠️ **Kollision mit der Reschedule-Auswertung.** `reschedule.naechster_zustand` arbeitet
+  nach der Regel „die neueste Bot-Nachricht entscheidet" (das ist die Idempotenz-Garantie,
+  siehe Phase 6). Eine Erinnerungs-PM zum Erledigt-Status wäre die neueste Bot-Nachricht
+  und würde die Reschedule-Auswertung blockieren: wer nach so einer PM ❌ auf eine ältere
+  Auslos-DM klickt, würde ignoriert. **Lösung:** jede Auswertung filtert den Verlauf
+  zuerst auf ihre eigene Nachrichtenfamilie und wendet „neueste gewinnt" nur darin an.
+  Das ist möglich, weil inzwischen *alle* Reschedule-Nachrichten Metadata tragen.
+
+## Verhalten bei manuellen Notion-Änderungen (geprüft 01.09.2026)
+
+Nichts davon zerstört Daten, aber es gibt zwei **stille** Lücken:
+
+| Manuelle Änderung | Verhalten |
+|---|---|
+| Mitglied trägt sich aus KW 40 aus | Steht in keiner Zukunftswoche → wird **gar nicht mehr gepollt**. Ein ❌ auf der alten DM bleibt folgenlos. KW 40 hat still 3 Leute, **es wird nicht nachgelost**. |
+| Mitglied trägt sich von KW 40 nach KW 42 um | Wird gepollt (wegen KW 42), aber das ❌ zur KW 40 wird verworfen (`woche not in aktuelle_wochen`) → **stiller No-Op ohne Rückmeldung**. Für KW 42 gab es nie eine DM, dort kann also auch nicht ❌ geklickt werden. |
+| Zusätzlicher Eintrag in eine volle Woche | `needed ≤ 0` → nichts gezogen, nichts geschrieben. Harmlos. |
+| Status auf `Erledigt` | `draw`/`plan` überspringen die Woche, die **Erinnerung nicht** — `_is_untouchable` prüft nur `Archiv` und `Nicht auswählen`. Kleine Unsauberkeit. |
+| Wochenseite gelöscht | Notion entfernt die Relation auch bei den Mitgliedern → deren `putz_count` sinkt still. |
+| Bearbeitung während eines Bot-Laufs | `update_page_members` schreibt die **komplette** Liste zurück → die menschliche Änderung geht verloren. Fenster: Sekunden pro Lauf. |
+
+**Naheliegende Gegenmaßnahmen** (noch nicht gebaut): statt stillem Verwerfen eine kurze
+PM („du stehst in KW 40 gar nicht mehr drin"), und ein wöchentlicher Blick auf die
+kommenden Wochen, der Unterbesetzung nachlost. Letzteres deckt auch Svens No-Show-Fall ab.
 
 ## Priorität, falls Zeit knapp ist
 
