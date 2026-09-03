@@ -319,8 +319,31 @@ Im Sandbox gilt: mit `SLACK_TEST_USER_ID` lösen alle Mitglieder auf dieselbe Sl
 Das ist der einzige Weg, den Pfad dort überhaupt zu testen — die echten Adressen gibt es
 im Sandbox-Workspace nicht.
 
-**Noch offen:** Live-Durchlauf (Sandbox und danach produktiv), und die Ankündigung im
-Kanal, dass ab sofort der Besen geklickt wird.
+### Sandbox-Durchlauf am 03.09.2026 ✅
+
+Kompletter Dreischritt an einem Abend, per `HEUTE_KW`-Zeitreise (Wochennachrichten für
+KW 35 und KW 36 gepostet, nur unter KW 36 den Besen geklickt):
+
+- Wochennachricht trägt Metadata und den vorgesetzten `:broom:`; der Erklärtext steht
+  darunter. Keine Warnung beim Vorsetzen → `reactions:write` greift auch im Kanal.
+- **`channels:history` funktioniert** — der Bot findet seine eigene Wochennachricht wieder.
+- KW 36 (Besen geklickt): „bestätigt 4 von 4", keine PM, beim Abschluss keine Änderung an
+  der Relation, Status `Erledigt`. Alle vier stehen unverändert drin.
+- KW 35 (nichts geklickt): vier Nachfrage-PMs mit vorgesetztem ✅/❌ und der Frist als
+  **Datum** („bis Montag, 14.09."), Notion unangetastet.
+- Nach ✅ (Thomas) / ❌ (Tobias) / zweimal Schweigen: Abschluss trägt drei aus, behält
+  einen, Status `Erledigt`. Die Begründungen in den PMs unterscheiden „mit ❌ geantwortet"
+  von „keine Rückmeldung"; wer bestätigt hat, bekommt keine Nachricht.
+- Der „verpasster Montag"-Fall ist dabei mitgelaufen: KW 35 war beim ersten
+  `erledigt`-Lauf schon über der Frist, es wurde trotzdem erst gefragt und erst im
+  nächsten Lauf abgeschlossen.
+
+**Live noch nicht durchgespielt:** der unerwartete Helfer (Besen von jemandem, der nicht
+eingetragen war) — dafür braucht es einen zweiten Sandbox-User, weil mit
+`SLACK_TEST_USER_ID` alle Mitglieder auf dieselbe ID auflösen. Offline abgedeckt.
+
+**Noch offen:** produktiver Erstlauf und die Ankündigung im Kanal, dass ab sofort der
+Besen geklickt wird.
 
 ## Verhalten bei manuellen Notion-Änderungen (geprüft 01.09.2026)
 
