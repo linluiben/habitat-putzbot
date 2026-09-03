@@ -37,6 +37,14 @@ on:
         description: 'Plan-Lauf erzwingen (nur für Modus "weekly" relevant)'
         type: boolean
         default: false
+      heute_kw:
+        description: 'Testzeitreise: als welche KW soll der Bot rechnen? (leer = heute)'
+        type: string
+        default: ''
+      tracking_start_kw:
+        description: 'Erledigt-Tracking: ab welcher KW ausgewertet wird (leer = 37)'
+        type: string
+        default: ''
 
 jobs:
   sandbox:
@@ -92,4 +100,10 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           DEBUG: ${{ inputs.debug }}
           FORCE_PLAN: ${{ inputs.force_plan }}
+
+          # Nur hier, bewusst NICHT in den Produktivworkflows: damit sich der
+          # Dreischritt des Erledigt-Trackings (Nachricht → Abgleich → Abschluss)
+          # an einem Tag durchspielen lässt statt über drei echte Montage.
+          HEUTE_KW: ${{ inputs.heute_kw }}
+          TRACKING_START_KW: ${{ inputs.tracking_start_kw }}
         run: python main.py ${{ inputs.modus }}

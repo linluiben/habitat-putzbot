@@ -11,7 +11,7 @@ können, ohne sich gegenseitig zu importieren.
 
 from datetime import date
 
-from config import CYCLE_LENGTH_WEEKS, CYCLES_PER_YEAR
+from config import CYCLE_LENGTH_WEEKS, CYCLES_PER_YEAR, HEUTE_JAHR, HEUTE_KW
 
 
 def iso_weeks_in_year(year):
@@ -20,9 +20,14 @@ def iso_weeks_in_year(year):
 
 
 def current_week():
-    """(kw, jahr) für heute — als ISO-Jahr, das um den Jahreswechsel vom Kalenderjahr abweicht."""
+    """(kw, jahr) für heute — als ISO-Jahr, das um den Jahreswechsel vom Kalenderjahr abweicht.
+
+    `HEUTE_KW`/`HEUTE_JAHR` überschreiben das für Testläufe: das Erledigt-Tracking
+    wertet vergangene Wochen aus und wäre sonst nur über mehrere echte Montage
+    hinweg zu testen.
+    """
     iso = date.today().isocalendar()
-    return iso[1], iso[0]
+    return HEUTE_KW or iso[1], HEUTE_JAHR or iso[0]
 
 
 def cycle_of_week(kw):

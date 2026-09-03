@@ -41,6 +41,8 @@ from config import (
     DEBUG,
     DRY_RUN,
     FORCE_PLAN,
+    HEUTE_JAHR,
+    HEUTE_KW,
     SLACK_TEST_USER_ID,
     SLACK_ZIEL,
     check_env,
@@ -88,6 +90,9 @@ def main(argv):
         print("🐛 DEBUG aktiv.")
     if SLACK_TEST_USER_ID:
         print(f"📮 Alle DMs gehen umgeleitet an {SLACK_TEST_USER_ID}.")
+    if HEUTE_KW or HEUTE_JAHR:
+        print(f"⏱️ ACHTUNG: Der Bot rechnet mit KW {kw}/{year} statt mit dem "
+              f"echten Datum (HEUTE_KW/HEUTE_JAHR gesetzt).")
 
     # Auswahlwerte in Notion können umbenannt werden; die Filter hängen an den
     # Namen. Lieber hier abbrechen als mit halbem Kandidatenpool auslosen.

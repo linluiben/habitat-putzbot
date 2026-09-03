@@ -132,6 +132,14 @@ DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 # Plan-Lauf erzwingen, auch wenn gerade nicht die letzte Woche eines Zyklus ist (zum Testen).
 FORCE_PLAN = os.environ.get("FORCE_PLAN", "false").lower() == "true"
 
+# NUR ZUM TESTEN: den Bot so laufen lassen, als wäre eine andere Kalenderwoche.
+# Ohne das ließe sich das Erledigt-Tracking nicht am Stück testen — es wertet
+# vergangene Wochen aus, man müsste also über drei echte Montage hinweg testen.
+# In keinem Produktiv-Workflow gesetzt; `main.py` schreibt es beim Start gross
+# heraus, damit ein vergessener Wert nicht unbemerkt mitläuft.
+HEUTE_KW = int(os.environ["HEUTE_KW"]) if os.environ.get("HEUTE_KW") else None
+HEUTE_JAHR = int(os.environ["HEUTE_JAHR"]) if os.environ.get("HEUTE_JAHR") else None
+
 # --- Notion API ---
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2025-09-03"
@@ -215,12 +223,14 @@ TRACKING_ENABLED = True
 # diese Grenze wuerde der erste Lauf die komplette Historie "abschliessen" und
 # aus jeder alten Woche alle austragen, die dort nie reagieren konnten — die
 # Wochennachrichten von damals tragen ja gar keine Metadata.
-TRACKING_START_KW = 37
-TRACKING_START_YEAR = 2026
+# Aus der Umgebung überschreibbar, damit sich der Ablauf im Sandbox in einer
+# Sitzung durchspielen lässt statt über drei echte Montage.
+TRACKING_START_KW = int(os.environ.get("TRACKING_START_KW") or 37)
+TRACKING_START_YEAR = int(os.environ.get("TRACKING_START_YEAR") or 2026)
 
 # Frist zwischen Nachfrage-PM und Abschluss. 1 = die Nachfrage geht am Montag
 # nach der Putzwoche raus, abgeschlossen wird am Montag darauf.
-TRACKING_DEADLINE_WEEKS = 1
+TRACKING_DEADLINE_WEEKS = int(os.environ.get("TRACKING_DEADLINE_WEEKS") or 1)
 # Weiter zurueck als das wird nichts mehr abgeschlossen. Puffer fuer ausgefallene
 # Montagslaeufe, aber begrenzt — eine Woche, die monatelang liegen blieb, still
 # nachtraeglich umzuschreiben waere schlimmer als sie stehen zu lassen.

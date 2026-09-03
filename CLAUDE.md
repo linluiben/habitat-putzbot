@@ -72,6 +72,8 @@ There is no test framework; `tests.py` is a plain script that fakes the Notion/S
 | `DEBUG` | `"true"` → verbose diagnostics (per-tier candidate counts, lookups) |
 | `FORCE_PLAN` | `"true"` → run cycle planning even outside the last week of a cycle |
 | `SLACK_TEST_USER_ID` | If set, **all** DMs are redirected to this user (sandbox testing — see [sandbox-setup.md](docs/sandbox-setup.md)) |
+| `HEUTE_KW`, `HEUTE_JAHR` | **Test only.** Run as if it were that ISO week. The Erledigt-Tracking evaluates *past* weeks, so without this the three-step flow could only be tested across three real Mondays. Set in `sandbox_test.yml` only; `main.py` prints a loud warning when it is active. |
+| `TRACKING_START_KW`, `TRACKING_START_YEAR`, `TRACKING_DEADLINE_WEEKS` | Override the tracking window (defaults 37 / 2026 / 1). Same purpose: make the flow testable in one sitting. |
 | `SANDBOX` | `"true"` → switch Slack to the sandbox workspace |
 | `SANDBOX_SLACK_TOKEN`, `SANDBOX_SLACK_CHANNEL_ID` | Required when `SANDBOX=true`; config aborts rather than falling back to the real workspace |
 | `SANDBOX_SLACK_TEST_USER_ID` | Sandbox DM target — a *different* user ID than in the real workspace |
