@@ -29,6 +29,7 @@ import slack_utils
 from config import (
     CREW_SIZE,
     CYCLE_LENGTH_WEEKS,
+    ERLEDIGT_EVENTS,
     META_AUSLOSUNG,
     META_BESTAETIGUNG,
     META_FRAGE,
@@ -109,12 +110,18 @@ def verlauf_fuer(verlauf, member_id):
     Nachrichten des Mitglieds selbst (die Antworten) tragen keine Metadata und
     bleiben deshalb immer drin — genauso wie Bot-Nachrichten ohne Zuordnung,
     damit der Anker "neueste eigene Nachricht gewinnt" nicht aufgeweicht wird.
+
+    Aus demselben Grund fliegen Nachrichten der Erledigt-Familie raus: eine
+    Nachfrage "warst du in KW 36 putzen?" wäre sonst die neueste Bot-Nachricht
+    und würde diesen Anker besetzen — ein ❌ auf einer älteren Auslos-DM bliebe
+    dann für immer wirkungslos. Jede Auswertung sieht nur ihre eigene Familie.
     """
     return [
         eintrag
         for eintrag in verlauf
         if not eintrag["ist_vom_bot"]
-        or eintrag["payload"].get("mitglied") in (None, member_id)
+        or (eintrag["payload"].get("mitglied") in (None, member_id)
+            and eintrag["event_type"] not in ERLEDIGT_EVENTS)
     ]
 
 

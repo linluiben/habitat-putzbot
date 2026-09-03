@@ -203,6 +203,52 @@ META_FRAGE = "putzbot_reschedule_frage"
 META_BESTAETIGUNG = "putzbot_reschedule_erledigt"
 
 DM_HISTORY_LIMIT = 30         # so viele Nachrichten pro DM-Verlauf ansehen
+CHANNEL_HISTORY_LIMIT = 200   # so viele Kanal-Nachrichten pro Rueckblick ansehen
+
+# --- Erledigt-Tracking ---
+# Frage: wer hat tatsaechlich geputzt? Bisher zaehlt der Bot nur Zuteilungen,
+# nicht Erledigungen — wer eingetragen war und nicht kam, sieht fuer die
+# Fairness-Rechnung aus wie jemand, der da war ("hat ja letztens erst").
+TRACKING_ENABLED = True
+
+# Erste Woche, die ueberhaupt ausgewertet wird. UNBEDINGT gesetzt lassen: ohne
+# diese Grenze wuerde der erste Lauf die komplette Historie "abschliessen" und
+# aus jeder alten Woche alle austragen, die dort nie reagieren konnten — die
+# Wochennachrichten von damals tragen ja gar keine Metadata.
+TRACKING_START_KW = 37
+TRACKING_START_YEAR = 2026
+
+# Frist zwischen Nachfrage-PM und Abschluss. 1 = die Nachfrage geht am Montag
+# nach der Putzwoche raus, abgeschlossen wird am Montag darauf.
+TRACKING_DEADLINE_WEEKS = 1
+# Weiter zurueck als das wird nichts mehr abgeschlossen. Puffer fuer ausgefallene
+# Montagslaeufe, aber begrenzt — eine Woche, die monatelang liegen blieb, still
+# nachtraeglich umzuschreiben waere schlimmer als sie stehen zu lassen.
+TRACKING_MAX_LOOKBACK_WEEKS = 6
+
+# Bestaetigung unter der Wochennachricht: bewusst ein Emoji, das sonst kaum
+# jemand benutzt. Ein ✅ oder 👍 unter einer Erinnerung heisst genauso gut
+# "gesehen" oder "gute Idee" — und jede Fehldeutung kostet eine PM
+# ("du warst gar nicht dran, trage ich dich ein?") an jemanden, der nur nett
+# sein wollte. Der Besen ist eindeutig, steht vorgesetzt unter der Nachricht
+# und wird im Text ausdruecklich erklaert.
+PUTZ_REACTION = "broom"
+
+# Ein ❌ im KANAL wird bewusst NICHT ausgewertet: unter einer oeffentlichen
+# Nachricht kann es vieles heissen, und wer nicht reagiert, bekommt ohnehin die
+# Nachfrage-PM. Dort ist ✅/❌ eindeutig, weil die Frage danebensteht.
+
+META_WOCHE = "putzbot_wochennachricht"
+META_ERLEDIGT_FRAGE = "putzbot_erledigt_frage"
+META_ERLEDIGT_ABSCHLUSS = "putzbot_erledigt_abschluss"
+
+# Nachrichtenfamilien. Beide Auswertungen arbeiten nach der Regel "die neueste
+# eigene Nachricht entscheidet" — ohne Trennung wuerde eine Erledigt-PM den
+# Reschedule-Verlauf abriegeln und ein ❌ auf einer aelteren Auslos-DM waere
+# fuer immer wirkungslos. Deshalb filtert jede Auswertung den Verlauf zuerst
+# auf ihre eigene Familie.
+RESCHEDULE_EVENTS = (META_AUSLOSUNG, META_FRAGE, META_BESTAETIGUNG)
+ERLEDIGT_EVENTS = (META_ERLEDIGT_FRAGE, META_ERLEDIGT_ABSCHLUSS)
 
 slack = WebClient(token=SLACK_TOKEN)
 

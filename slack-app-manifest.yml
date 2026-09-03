@@ -25,6 +25,10 @@ oauth_config:
       - chat:write         # Nachrichten in Kanal und DMs
       - im:write           # DM-Konversation oeffnen
       - im:history         # eigene DMs lesen (fuer Reaktionen, Phase 5/6)
+      - channels:history   # Kanal-Historie lesen: die Wochennachricht samt
+                           # Metadata und den :broom:-Bestaetigungen wiederfinden
+                           # (Erledigt-Tracking). Bei einem PRIVATEN Kanal
+                           # waere stattdessen groups:history noetig.
       - users:read         # User-Liste
       - users:read.email   # E-Mail -> Slack-User-ID, Kern des Mitglieder-Mappings
       - reactions:read     # ✅/❌ auf DMs erkennen (Phase 5/6)

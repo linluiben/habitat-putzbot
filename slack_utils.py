@@ -3,12 +3,15 @@
 from slack_sdk.errors import SlackApiError
 
 from config import (
+    CHANNEL_HISTORY_LIMIT,
     CONFIRM_REACTIONS,
     DECLINE_REACTIONS,
     DM_HISTORY_LIMIT,
     DM_ONLY,
     DRY_RUN,
     META_AUSLOSUNG,
+    META_WOCHE,
+    PUTZ_REACTION,
     RESCHEDULE_ENABLED,
     SLACK_CHANNEL_ID,
     SLACK_TEST_USER_ID,
@@ -17,6 +20,7 @@ from config import (
 )
 
 _user_id_cache = {}
+_email_cache = {}  # Slack-User-ID -> E-Mail (Rueckweg, nur fuer unerwartete Reagierende)
 _eigene_id = {}  # Dict statt Variable, damit "noch nicht geholt" von "geht nicht" trennbar bleibt
 
 
@@ -75,22 +79,43 @@ def mention_list(members):
     return ", ".join(mention(m) for m in members)
 
 
-def post_channel(text, channel=None):
+def post_channel(text, channel=None, metadata=None, reaktionen=()):
+    """Nachricht in den Kanal. Gibt den Message-Timestamp zurück (sonst None).
+
+    `metadata` haengt strukturiert an der Nachricht und kommt beim Lesen der
+    Kanal-Historie wieder mit — so findet der Erledigt-Abgleich die
+    Wochennachricht wieder, ohne die KW aus dem Text zurückrechnen zu müssen.
+
+    `reaktionen` setzt der Bot selbst vor, damit man zum Bestätigen nur noch
+    klicken muss statt das richtige Emoji suchen zu müssen.
+    """
     channel = channel or SLACK_CHANNEL_ID
     if DM_ONLY:
         print(f"   🚫 DM_ONLY — Kanal-Nachricht an {channel} unterdrückt:\n{_indent(text)}")
-        return False
+        return None
     if DRY_RUN:
         print(f"   🧪 [DRY RUN] Kanal-Nachricht an {channel}:\n{_indent(text)}")
-        return True
+        return None
 
     try:
-        slack.chat_postMessage(channel=channel, text=text)
+        kwargs = {"channel": channel, "text": text}
+        if metadata:
+            kwargs["metadata"] = metadata
+        response = slack.chat_postMessage(**kwargs)
         print("   📨 Slack-Nachricht in den Kanal gesendet.")
-        return True
     except SlackApiError as error:
         print(f"   ❌ Slack-Fehler (Kanal): {error.response['error']}")
-        return False
+        return None
+
+    # Eigener Block, gleiche Begründung wie bei den DMs: scheitert das
+    # Vorsetzen, ist die Nachricht trotzdem raus und gültig.
+    for emoji in reaktionen:
+        try:
+            slack.reactions_add(channel=channel, timestamp=response["ts"], name=emoji)
+        except SlackApiError as error:
+            print(f"   ⚠️ Reaktion :{emoji}: nicht gesetzt: {error.response['error']}")
+
+    return response["ts"]
 
 
 def dm_channel(member):
@@ -224,6 +249,126 @@ def reaktion_auf(eintrag):
     return None
 
 
+def slack_id_fuer(member):
+    """Slack-ID eines Mitglieds — mit derselben Umleitung wie bei den DMs.
+
+    Mit `SLACK_TEST_USER_ID` bekommen ALLE Mitglieder dieselbe ID. Das ist
+    gewollt und die einzige Art, den Erledigt-Abgleich im Sandbox-Workspace zu
+    testen: dort existieren die echten E-Mail-Adressen nicht, der Lookup ginge
+    für jedes Mitglied ins Leere. Preis: eine Bestätigung der Testperson
+    bestätigt die ganze Crew — genauso, wie dort alle DMs bei einer Person
+    landen.
+    """
+    return SLACK_TEST_USER_ID or get_slack_user_id(member.get("email"))
+
+
+def email_fuer_user(user_id):
+    """E-Mail zu einer Slack-ID — der Rückweg zu einem Notion-Mitglied.
+
+    Bewusst einzeln und nur für UNERWARTETE Reagierende: die Crew ist über
+    `slack_id_fuer` ohnehin schon aufgelöst, und alle ~60 Mitglieder
+    aufzulösen wäre ein Vielfaches an API-Aufrufen für denselben Zweck.
+    """
+    if user_id in _email_cache:
+        return _email_cache[user_id]
+    try:
+        profil = slack.users_info(user=user_id)["user"].get("profile") or {}
+        email = profil.get("email")
+    except (SlackApiError, KeyError) as error:
+        debug(f"users_info für {user_id} fehlgeschlagen: {error}")
+        email = None
+    _email_cache[user_id] = email
+    return email
+
+
+def lies_kanal_verlauf(oldest=None, channel=None):
+    """Bot-Nachrichten aus dem Kanal, neueste zuerst, samt Metadata.
+
+    Braucht den Scope `channels:history` (bzw. `groups:history`, wenn der Kanal
+    privat ist) und setzt voraus, dass der Bot Mitglied des Kanals ist.
+    """
+    channel = channel or SLACK_CHANNEL_ID
+    kwargs = {"channel": channel, "limit": CHANNEL_HISTORY_LIMIT,
+              "include_all_metadata": True}
+    if oldest:
+        kwargs["oldest"] = str(oldest)
+
+    try:
+        response = slack.conversations_history(**kwargs)
+    except SlackApiError as error:
+        fehler = error.response["error"]
+        print(f"   ⚠️ Kanal-Historie nicht lesbar: {fehler}")
+        if fehler == "missing_scope":
+            print("      Fehlt vermutlich `channels:history` (bei privaten Kanälen "
+                  "`groups:history`) — App-Scopes prüfen und neu installieren.")
+        elif fehler == "not_in_channel":
+            print("      Der Bot ist kein Mitglied des Kanals — einladen.")
+        return None
+    return response.get("messages", [])
+
+
+def finde_wochennachrichten(oldest=None, channel=None):
+    """Wochennachrichten aus dem Kanal als {(kw, jahr): ts}.
+
+    Gibt None zurück, wenn die Historie gar nicht gelesen werden konnte — das
+    ist etwas anderes als "keine Nachricht gefunden" und muss vom Aufrufer
+    unterschieden werden, sonst würde ein fehlender Scope wie "niemand hat
+    geputzt" aussehen.
+    """
+    messages = lies_kanal_verlauf(oldest=oldest, channel=channel)
+    if messages is None:
+        return None
+
+    gefunden = {}
+    for message in messages:
+        metadata = message.get("metadata") or {}
+        if metadata.get("event_type") != META_WOCHE:
+            continue
+        payload = metadata.get("event_payload") or {}
+        kw, jahr = payload.get("kw"), payload.get("jahr")
+        if kw is None or jahr is None:
+            continue
+        # Neueste zuerst: eine später wiederholte Nachricht zur selben Woche
+        # gewinnt, weil dort die aktuellen Reaktionen stehen.
+        gefunden.setdefault((int(kw), int(jahr)), message.get("ts"))
+
+    debug(f"Kanal-Historie: {len(messages)} Nachrichten, {len(gefunden)} Wochennachrichten.")
+    return gefunden
+
+
+def reagierende_user(ts, emoji, channel=None):
+    """User-IDs, die mit `emoji` auf eine Nachricht reagiert haben (ohne den Bot).
+
+    Bewusst `reactions.get` statt der Reaktionen aus `conversations_history`:
+    dort kann die `users`-Liste gekürzt sein, und eine gekürzte Liste hiesse
+    hier "hat nicht geputzt".
+    """
+    channel = channel or SLACK_CHANNEL_ID
+    try:
+        antwort = slack.reactions_get(channel=channel, timestamp=ts, full=True)
+    except SlackApiError as error:
+        print(f"   ⚠️ Reaktionen zu {ts} nicht lesbar: {error.response['error']}")
+        return None
+
+    reaktionen = ((antwort.get("message") or {}).get("reactions")) or []
+    ich = eigene_user_id()
+    for reaktion in reaktionen:
+        if reaktion.get("name") == emoji:
+            return {uid for uid in (reaktion.get("users") or []) if uid != ich}
+    return set()
+
+
+def wochen_metadata(kw, year):
+    return {"event_type": META_WOCHE, "event_payload": {"kw": kw, "jahr": year}}
+
+
+def erledigt_metadata(event_type, member, kw, year, art=None):
+    payload = {"kw": kw, "jahr": year, "mitglied": member["id"]}
+    if art:
+        payload["art"] = art
+    return {"event_type": event_type, "event_payload": payload}
+
+
 def auslosung_metadata(member, kw, year):
     return {
         "event_type": META_AUSLOSUNG,
@@ -286,9 +431,68 @@ def build_wochen_auslosung(kw, bestehend, gelost, page_url):
             text += f"Danke fürs freiwillige Eintragen: {mention_list(bestehend)} 🙏\n"
         text += f"Ausgelost wurden: {mention_list(gelost)} 🎲"
 
+    text += build_bestaetigungs_hinweis()
     if page_url:
         text += f"\n\n👉 <{page_url}|Zur Woche in Notion>"
     return text
+
+
+def build_bestaetigungs_hinweis():
+    """Der Absatz, der die :broom:-Bestätigung erklärt.
+
+    Steht unter jeder Wochennachricht, weil die Reaktion sonst niemand als
+    Aufforderung liest — und weil ein Emoji ohne Erklärung genauso gut
+    "gesehen" heißen kann.
+    """
+    return (
+        f"\n\n*Wenn ihr geputzt habt, klickt hier auf* :{PUTZ_REACTION}: — "
+        f"daran erkenne ich, wer wirklich dran war.\n"
+        f"_Nur für die, die diese Woche tatsächlich geputzt haben. Wer nicht dazu "
+        f"gekommen ist, klickt einfach nichts — ich frage nächste Woche kurz per "
+        f"PM nach. Wer spontan mitgeholfen hat, darf auch klicken._"
+    )
+
+
+def build_erledigt_frage(member, kw, art, frist_text):
+    """Nachfrage-PM beim Erledigt-Abgleich.
+
+    `art` ist 'ausgelost' (war eingetragen, hat nicht bestätigt) oder 'zusatz'
+    (hat bestätigt, war aber nicht eingetragen).
+    """
+    if art == "zusatz":
+        return (
+            f"Hallo {vorname(member)}! 🧹\n\n"
+            f"Du hast unter der Nachricht zu *KW {kw}* auf :{PUTZ_REACTION}: geklickt, "
+            f"standst dort aber gar nicht im Putzplan. Hast du mitgeputzt?\n"
+            f"✅ = ja, trag mich bitte ein\n"
+            f"❌ = nein, das war ein Versehen\n\n"
+            f"_Wenn ich bis {frist_text} nichts höre, lasse ich KW {kw} so, wie sie ist._"
+        )
+    return (
+        f"Hallo {vorname(member)}! 🧹\n\n"
+        f"Du warst für *KW {kw}* in der Putzcrew eingetragen, hast unter der "
+        f"Wochennachricht aber nicht auf :{PUTZ_REACTION}: geklickt. Warst du putzen?\n"
+        f"✅ = ja, war ich\n"
+        f"❌ = nein, hat nicht geklappt\n\n"
+        f"_Wenn ich bis {frist_text} nichts höre, trage ich dich aus KW {kw} aus. "
+        f"Die Woche zählt dann nicht als dein Putzeinsatz — du kommst also früher "
+        f"wieder in den Lostopf._"
+    )
+
+
+def build_erledigt_eingetragen(member, kw, page_url=None):
+    text = f"Danke dir! Ich habe dich für *KW {kw}* als Putzeinsatz eingetragen. ✅"
+    if page_url:
+        text += f"\n\n👉 <{page_url}|Zur Woche in Notion>"
+    return text
+
+
+def build_erledigt_ausgetragen(member, kw, grund):
+    return (
+        f"Ich habe dich wieder aus *KW {kw}* ausgetragen: {grund}.\n\n"
+        f"Die Woche zählt damit nicht als dein Putzeinsatz — du kommst also früher "
+        f"wieder in den Lostopf. Falls das nicht stimmt, meld dich einfach kurz."
+    )
 
 
 def build_reminder(kw, crew, page_url):
@@ -304,6 +508,7 @@ def build_reminder(kw, crew, page_url):
             f"🧹 *Putzplan KW {kw}* 🧹\n\n"
             f"Diese Woche seid ihr dran: {mention_list(crew)} 💚"
         )
+    text += build_bestaetigungs_hinweis()
     if page_url:
         text += f"\n\n👉 <{page_url}|Zur Woche in Notion>"
     return text

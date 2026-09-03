@@ -148,7 +148,9 @@ Vergangenheits-Meldung ist toter Code. Live bestätigt am 01.08.
 > `draw`, es fällt also nichts aus, wenn das später passiert: nächsten Montag wird
 > regulär für KW 37 ausgelost. Da die Ankündigung ohnehin noch aussteht, bietet es sich
 > an, das Erledigt-Tracking (Phase 10) gleich mit einzubauen — dann lernen die Mitglieder
-> einmal um statt zweimal.
+> einmal um statt zweimal. **Genau das ist am 03.09. passiert:** Phase 10 ist gebaut, die
+> Ankündigung muss den Besen also gleich miterklären. Ausgewertet wird ab KW 37
+> (`TRACKING_START_KW`), also ab der ersten Woche im Normalbetrieb.
 
 Der Wechsel läuft über mehrere Wochen statt an einem Tag. Grund: die ersten beiden
 Augustwochen fallen in den Urlaub, und ein unbeaufsichtigt klemmender DM-Flow wäre
@@ -217,7 +219,7 @@ wirkungslos. Abschalten würde nur das Risiko schaffen, das Wiedereinschalten be
 - [ ] Danach sind Buttons und Slash-Commands möglich (V3.2/V3.3, siehe [roadmap.md](roadmap.md)) — die gehen per Polling grundsätzlich nicht.
 - [ ] [webhook-setup.md](webhook-setup.md) beschreibt die HTTP-Webhook-Variante. Die ist für diesen Fall vermutlich nicht mehr nötig; das Dokument bleibt als Referenz.
 
-## Phase 10 — Erledigt-Tracking (entschieden, noch nicht gebaut)
+## Phase 10 — Erledigt-Tracking ✅ (gebaut, live noch nicht verifiziert)
 
 **Das Problem:** `putz_count` zählt **Zuteilungen, keine Erledigungen.** Wer eingetragen
 war und nicht kam, ist im System nicht von jemandem zu unterscheiden, der da war — und
@@ -255,6 +257,11 @@ Hetzner-Umzug — per Emoji lässt sich das ohnehin nicht ausdrücken.
 | Speicherung | **Eine** Relation. Wer nicht geputzt hat, wird aus `Mitglieder` der Wochenseite ausgetragen; wer zusätzlich geputzt hat, kommt dazu. Nebeneffekt: `putz_count` und Schonfrist korrigieren sich damit von selbst. Preis: „war ausgelost, hat nicht geputzt" ist danach nur noch in Slack sichtbar. |
 | Keine Reaktion | Gilt **vorerst als erledigt** — nur ein explizites ❌ setzt zurück. Langfristig soll die Bestätigung Pflicht werden, mit vorheriger Erinnerung; das wird zusammen mit den Erinnerungen für unbeantwortete Auslos-DMs gebaut (V3.1). |
 | Abgleich | Der Bot vergleicht Reagierende mit Ausgelosten und schreibt bei Abweichung eine PM: an Ausgeloste ohne Reaktion („stimmt das?"), an Reagierende ohne Zuteilung („du warst gar nicht dran — trage ich dich ein?"). Zeitpunkt offen: Mittwoch der Folgewoche oder direkt montags mit der neuen Wochennachricht. |
+| Bestätigungs-Emoji | **`:broom:`** statt ✅ (Stand 03.09.). Ein ✅ oder 👍 unter einer Erinnerung heißt genauso gut „gesehen" oder „gute Idee" — und jede Fehldeutung kostet jemanden eine PM („du warst gar nicht dran, trage ich dich ein?"), der nur nett sein wollte. Der Besen wird sonst kaum benutzt, steht vorgesetzt unter der Nachricht und wird im Text ausdrücklich erklärt. Ein ❌ im **Kanal** wird bewusst gar nicht ausgewertet: unter einer öffentlichen Nachricht ist es mehrdeutig, und wer nicht reagiert, bekommt ohnehin die Nachfrage-PM. |
+| Zeitpunkt | **Montags**, im `weekly`-Lauf vor der Erinnerung. Bis dahin sollte die Vorwoche geputzt sein. |
+| Frist | **Eine Woche** (`TRACKING_DEADLINE_WEEKS`). Mo KW N+1 gehen die Nachfrage-PMs raus, Mo KW N+2 wird abgeschlossen. |
+| Default nach Fristablauf | Es zählt nur, wer **ausgelost war und bestätigt hat**. Wer nicht reagiert hat, wird ausgetragen; wer zusätzlich reagiert, aber nicht geantwortet hat, wird **nicht** eingetragen. (Ersetzt die ältere Fassung „keine Reaktion gilt vorerst als erledigt".) |
+| Schreibzeitpunkt | Notion wird **einmal** geschrieben, beim Abschluss — nicht bei jeder Teilantwort. Ein Schreibzugriff pro Woche, und bis dahin ist alles korrigierbar. |
 | Notion-Rechte | **Kein** read-only. Seiten werden nur *gesperrt* (Bearbeiten erst nach Bestätigung), damit versehentliche Änderungen unwahrscheinlich werden. Read-only erst, wenn es einen Slack-Weg zum freiwilligen Eintragen gibt — sonst fiele genau das weg. Die Rollenverteilung (Slack = handeln, Notion = nachschlagen) kommt in die Ankündigung. |
 
 ### Technische Punkte
@@ -278,6 +285,42 @@ Hetzner-Umzug — per Emoji lässt sich das ohnehin nicht ausdrücken.
   Auslos-DM klickt, würde ignoriert. **Lösung:** jede Auswertung filtert den Verlauf
   zuerst auf ihre eigene Nachrichtenfamilie und wendet „neueste gewinnt" nur darin an.
   Das ist möglich, weil inzwischen *alle* Reschedule-Nachrichten Metadata tragen.
+  **Gebaut:** `config.RESCHEDULE_EVENTS` / `config.ERLEDIGT_EVENTS`,
+  `reschedule.verlauf_fuer` blendet die fremde Familie aus, `tracking.antwort_auf_nachfrage`
+  sieht nur die eigene. Regressionstest `test_nachrichtenfamilien`.
+
+### Was gebaut wurde (03.09.2026)
+
+- `tracking.py` mit `run_abgleich` / `verarbeite_woche` / `offene_wochen`, neuer Modus
+  `python main.py erledigt`, im `weekly`-Lauf **vor** der Erinnerung aufgerufen.
+- `slack_utils.post_channel` nimmt jetzt `metadata=` und `reaktionen=` und gibt den
+  Message-Timestamp zurück; `scheduler.post_wochennachricht` hängt `META_WOCHE` an
+  **beide** Wochennachrichten (Erinnerung *und* `draw`) und setzt den Besen vor.
+- Kanal-Historie über `channels:history`, exakte Reagierendenliste über `reactions.get`
+  (die `users`-Liste aus `conversations_history` kann gekürzt sein — und gekürzt hieße
+  hier „hat nicht geputzt").
+- Rückweg für unerwartete Reagierende: `users_info` pro unbekannter ID, dann Abgleich
+  über die E-Mail. Für die Crew reiner Mengenvergleich, wie geplant.
+
+**Drei Sicherungen, die nicht wegoptimiert werden dürfen:**
+
+1. `TRACKING_START_KW`/`TRACKING_START_YEAR` (37/2026) und `TRACKING_MAX_LOOKBACK_WEEKS`.
+   Ohne sie würde der erste Lauf die komplette Historie einsammeln und aus jeder alten
+   Woche alle austragen — deren Kanalnachrichten tragen keine Metadata, es sähe also
+   aus, als hätte nie jemand geputzt.
+2. **Keine Wochennachricht gefunden → niemand wird ausgetragen.** „Keine Reaktion" darf
+   nie als „niemand hat geputzt" durchgehen. Nach Fristablauf wird nur der Status
+   gesetzt, damit es nicht ewig meckert.
+3. Eine Nachfrage, die **in diesem Lauf** erst rausging, verschiebt den Abschluss auf den
+   nächsten Lauf — sonst wäre die Frist nach einem ausgefallenen Montag null Sekunden lang.
+
+Im Sandbox gilt: mit `SLACK_TEST_USER_ID` lösen alle Mitglieder auf dieselbe Slack-ID auf
+(`slack_utils.slack_id_fuer`), ein Besen der Testperson bestätigt also die ganze Crew.
+Das ist der einzige Weg, den Pfad dort überhaupt zu testen — die echten Adressen gibt es
+im Sandbox-Workspace nicht.
+
+**Noch offen:** Live-Durchlauf (Sandbox und danach produktiv), und die Ankündigung im
+Kanal, dass ab sofort der Besen geklickt wird.
 
 ## Verhalten bei manuellen Notion-Änderungen (geprüft 01.09.2026)
 
@@ -295,6 +338,28 @@ Nichts davon zerstört Daten, aber es gibt zwei **stille** Lücken:
 **Naheliegende Gegenmaßnahmen** (noch nicht gebaut): statt stillem Verwerfen eine kurze
 PM („du stehst in KW 40 gar nicht mehr drin"), und ein wöchentlicher Blick auf die
 kommenden Wochen, der Unterbesetzung nachlost. Letzteres deckt auch Svens No-Show-Fall ab.
+
+### Offener Punkt: Schreibkollision Mensch ↔ Bot (03.09.2026, nicht im Scope von Phase 10)
+
+Zur Idee, die wöchentlichen Läufe (`draw`/`plan`/`weekly`) **nachts** laufen zu lassen,
+damit niemand gleichzeitig in Notion tippt:
+
+- **Ja, sinnvoll und billig** — eine Zeile Cron in `monday_cleanup.yml`. Aber es
+  verkleinert nur das Zeitfenster, es schließt die Lücke nicht: `update_page_members`
+  schreibt die **komplette** Mitgliederliste aus einem Cache zurück, der zu Beginn des
+  Laufs gelesen wurde. Wer in genau diesen Sekunden etwas ändert, verliert es.
+- **Die eigentliche Gegenmaßnahme** wäre, unmittelbar vor dem Schreiben die Seite neu zu
+  lesen und zu mergen, statt die gecachte Liste zu überschreiben. Notion hat kein
+  Compare-and-Swap, aber ein Re-Read direkt vor dem `PATCH` bringt das Fenster von
+  „Laufdauer" auf „ein API-Aufruf" herunter. Das ist hostingunabhängig und wäre der
+  nächste sinnvolle Schritt.
+- **Die Polls gehören weiter in die Wachzeiten** — sie sollen ja auf Klicks reagieren,
+  die tagsüber passieren. Der Umzug auf Hetzner/Socket Mode ändert an der
+  Kollisionsgefahr allerdings **nichts Grundsätzliches**: er macht die Schreibzugriffe
+  nur kleiner und punktueller (im Moment des Klicks statt gebündelt). Ohne Re-Read bleibt
+  dieselbe Race Condition, nur seltener.
+- Nebeneffekt eines Nachtlaufs: die Erledigt-Nachfragen und Auslos-DMs gingen dann nachts
+  raus. Slacks Do-Not-Disturb fängt das meist ab, der Badge ist morgens trotzdem da.
 
 ## Priorität, falls Zeit knapp ist
 

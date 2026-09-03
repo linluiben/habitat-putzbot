@@ -24,6 +24,7 @@ on:
           - poll
           - draw
           - plan
+          - erledigt
       dry_run:
         description: 'Dry Run — nichts in Notion/Slack schreiben'
         type: boolean

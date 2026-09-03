@@ -6,6 +6,9 @@ Betriebsarten:
                             zusätzlich Planung des Folgezyklus
     python main.py poll     mehrmals täglich: schaut nach ✅/❌-Reaktionen auf
                             die Auslos-DMs und wickelt Tauschwünsche ab
+    python main.py erledigt montags: gleicht ab, wer letzte Woche wirklich
+                            geputzt hat, und schließt Wochen ab, deren
+                            Nachfrage-Frist abgelaufen ist
 
 Dazu zwei Modi für den Umstieg von V2 auf V3, gedacht für den manuellen Aufruf:
 
@@ -19,8 +22,8 @@ Dazu zwei Modi für den Umstieg von V2 auf V3, gedacht für den manuellen Aufruf
                             E-Mail finden lässt. Ergebnis kommt als DM,
                             schreibt nichts.
 
-`weekly` ist die Summe aus Erinnerung und — am Zyklusende — `plan`. Die beiden
-Einzelmodi gibt es, damit sich beides an verschiedenen Tagen auslösen lässt.
+`weekly` ist die Summe aus `erledigt`, Erinnerung und — am Zyklusende — `plan`.
+Die Einzelmodi gibt es, damit sich das an verschiedenen Tagen auslösen lässt.
 
 Die eigentliche Logik liegt in den Modulen; hier wird nur orchestriert.
 """
@@ -32,6 +35,7 @@ import notion
 import reschedule
 import scheduler
 import tagcheck
+import tracking
 from config import (
     DATENQUELLE,
     DEBUG,
@@ -42,7 +46,7 @@ from config import (
     check_env,
 )
 
-MODI = ("weekly", "poll", "draw", "plan", "tags")
+MODI = ("weekly", "poll", "draw", "plan", "tags", "erledigt")
 
 
 def _lade_daten(mit_kandidaten):
@@ -111,6 +115,15 @@ def main(argv):
         print("\n✅ Fertig.")
         return 0
 
+    if modus == "erledigt":
+        # Braucht nur die Zuordnung ID -> Mitglied, es wird nichts ausgelost.
+        week_pages, lookup, _ = _lade_daten(mit_kandidaten=False)
+        if week_pages is None:
+            return 1
+        tracking.run_abgleich(week_pages, lookup, kw, year)
+        print("\n✅ Fertig.")
+        return 0
+
     if modus in ("draw", "plan"):
         week_pages, lookup, members = _lade_daten(mit_kandidaten=True)
         if week_pages is None:
@@ -129,6 +142,12 @@ def main(argv):
     week_pages, lookup, members = _lade_daten(mit_kandidaten=plan_faellig)
     if week_pages is None:
         return 1
+
+    # Erst abgleichen, dann erinnern: der Abgleich wertet die Nachricht der
+    # VORwoche aus, die Erinnerung postet die der laufenden. Andersherum stünde
+    # die neue Nachricht schon im Verlauf, wenn die alte gesucht wird — das geht
+    # zwar über die Metadata gut, ist aber unnötig verwirrend zu lesen.
+    tracking.run_abgleich(week_pages, lookup, kw, year)
 
     scheduler.remind_current_week(week_pages, lookup, kw, year)
 
