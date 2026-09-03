@@ -7,7 +7,9 @@ import slack_utils
 from config import (
     CREW_SIZE,
     PREFILL_REACTIONS,
+    PUTZ_REACTION,
     RESCHEDULE_ENABLED,
+    TRACKING_ENABLED,
     WEEK_STATUS_BLOCKED,
     WEEK_STATUS_DONE,
     WEEK_STATUS_FULL,
@@ -117,6 +119,21 @@ def fill_week(week, members, week_pages, lookup, exclude_ids=(), send_dms=True):
     return crew, page_url, selected
 
 
+def post_wochennachricht(text, kw, year):
+    """Die Nachricht, unter der die Woche bestätigt wird — mit Metadata und Besen.
+
+    Die Metadata `{kw, jahr}` ist der Anker für den Erledigt-Abgleich: ohne sie
+    müsste er die Kalenderwoche aus dem Nachrichtentext zurückrechnen. Der
+    vorgesetzte :broom: erspart es allen, das richtige Emoji zu suchen — wer
+    daneben greift, löst nämlich stillschweigend gar nichts aus.
+    """
+    return slack_utils.post_channel(
+        text,
+        metadata=slack_utils.wochen_metadata(kw, year) if TRACKING_ENABLED else None,
+        reaktionen=(PUTZ_REACTION,) if TRACKING_ENABLED else (),
+    )
+
+
 def remind_current_week(week_pages, lookup, kw, year):
     """Wöchentliche Erinnerung: wer ist diese Woche dran."""
     print(f"\n📣 Erinnerung für KW {kw}/{year}")
@@ -133,7 +150,9 @@ def remind_current_week(week_pages, lookup, kw, year):
         return
 
     crew = crew_from_ids(week["member_ids"], lookup)
-    slack_utils.post_channel(slack_utils.build_reminder(kw, crew, week["page_url"]))
+    post_wochennachricht(
+        slack_utils.build_reminder(kw, crew, week["page_url"]), kw, year
+    )
 
 
 def draw_current_week(week_pages, members, lookup, kw, year):
@@ -172,8 +191,8 @@ def draw_current_week(week_pages, members, lookup, kw, year):
         week, members, week_pages, lookup, send_dms=False
     )
 
-    slack_utils.post_channel(
-        slack_utils.build_wochen_auslosung(kw, bestehend, selected, page_url)
+    post_wochennachricht(
+        slack_utils.build_wochen_auslosung(kw, bestehend, selected, page_url), kw, year
     )
     return selected
 

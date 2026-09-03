@@ -40,6 +40,10 @@ python main.py draw     # transition mode: fill the CURRENT week, one channel
 python main.py plan     # plan the next cycle only (with DMs), no reminder
 python main.py tags     # diagnostic: can every eligible member be found in
                         # Slack by email? Report comes as a DM, writes nothing
+python main.py erledigt # reconcile who actually cleaned: read the :broom:
+                        # reactions on past weeks' channel messages, ask the
+                        # silent ones by DM, and close weeks whose deadline
+                        # has passed
 ```
 
 `draw` and `plan` exist for the V2→V3 changeover: `draw` is the old one-week-at-a-time
@@ -68,6 +72,8 @@ There is no test framework; `tests.py` is a plain script that fakes the Notion/S
 | `DEBUG` | `"true"` → verbose diagnostics (per-tier candidate counts, lookups) |
 | `FORCE_PLAN` | `"true"` → run cycle planning even outside the last week of a cycle |
 | `SLACK_TEST_USER_ID` | If set, **all** DMs are redirected to this user (sandbox testing — see [sandbox-setup.md](docs/sandbox-setup.md)) |
+| `HEUTE_KW`, `HEUTE_JAHR` | **Test only.** Run as if it were that ISO week. The Erledigt-Tracking evaluates *past* weeks, so without this the three-step flow could only be tested across three real Mondays. Set in `sandbox_test.yml` only; `main.py` prints a loud warning when it is active. |
+| `TRACKING_START_KW`, `TRACKING_START_YEAR`, `TRACKING_DEADLINE_WEEKS` | Override the tracking window (defaults 37 / 2026 / 1). Same purpose: make the flow testable in one sitting. |
 | `SANDBOX` | `"true"` → switch Slack to the sandbox workspace |
 | `SANDBOX_SLACK_TOKEN`, `SANDBOX_SLACK_CHANNEL_ID` | Required when `SANDBOX=true`; config aborts rather than falling back to the real workspace |
 | `SANDBOX_SLACK_TEST_USER_ID` | Sandbox DM target — a *different* user ID than in the real workspace |
@@ -91,6 +97,7 @@ In production these come from GitHub Actions secrets. Locally, copy [.env.exampl
 | [scheduler.py](scheduler.py) | Scheduled processes (`remind_current_week`, `plan_next_cycle`) plus `fill_week`, the shared draw-write-notify step. |
 | [reschedule.py](reschedule.py) | Poll for ✅/❌ reactions and move members between weeks. |
 | [tagcheck.py](tagcheck.py) | One-off diagnostic for the cutover: does every eligible member resolve to a Slack ID? |
+| [tracking.py](tracking.py) | Erledigt-Tracking: reconcile assignment against who actually cleaned, and write the result back. |
 
 `cycles.py` is separate from `scheduler.py` because both `raffle.py` and `scheduler.py` need week math; folding it in would create an import cycle.
 
@@ -136,6 +143,61 @@ The 2-new/2-old mix (`ist_neu` = joined less than a year ago) is the weakest cri
 
 `enrich_members` must be re-run per target week — distances are relative to the week being planned. Crews drawn earlier in the same run are tracked in `member["extra_weeks"]`, because the Notion relation is stale until the run finishes.
 
+## How the Erledigt-Tracking works
+
+`putz_count` used to count **assignments, not completions** — someone who was
+assigned and never showed up looked exactly like someone who did, and the
+fairness rules even treated them as "just cleaned recently". `tracking.py`
+reconciles that once per week.
+
+The confirmation is a **:broom: reaction on the weekly channel message**, not a
+DM. The crew is long settled by then and the post is there anyway. A deliberately
+unusual emoji: a ✅ or 👍 under a reminder just as plausibly means "seen" or
+"good idea", and every misread costs somebody an unwarranted "you weren't even
+on duty — shall I add you?" DM. The bot pre-seeds the :broom: itself and the
+message text spells out what it means. A ❌ **in the channel** is deliberately
+not evaluated — whoever does not react gets the follow-up DM anyway, and there
+✅/❌ is unambiguous because the question is right next to it.
+
+Three Mondays, for cleaning week KW N:
+
+| When | What |
+|---|---|
+| Mon KW N | Week message with metadata `{kw, jahr}` and a pre-seeded :broom:. |
+| Mon KW N+1 | **Abgleich**: read the reactions. Assigned members without a reaction, and reactors without an assignment, get a DM with a deadline. Notion is *not* touched yet. |
+| Mon KW N+2 | **Abschluss**: deadline is up. Notion is written **once**, status goes to `Erledigt`. Default for everyone who never answered: assigned members are removed, extra reactors are not added. |
+
+**One** relation, by decision: whoever did not clean is removed from `Mitglieder`
+on the week page, whoever cleaned extra is added. `putz_count` and the recency
+rules correct themselves as a side effect. The price is that "was assigned, did
+not clean" is afterwards only visible in Slack and in Notion's page history.
+
+No extra store: the deadline follows from the week distance, "already asked?"
+from the presence of the follow-up DM, "already closed?" from the Notion status.
+
+Three guards that matter:
+
+- **`TRACKING_START_KW`/`TRACKING_START_YEAR` and `TRACKING_MAX_LOOKBACK_WEEKS`.**
+  Without them the first run would sweep the entire history and remove everyone
+  from every old week — those channel messages carry no metadata, so it would
+  look like nobody ever cleaned.
+- **No channel message found → nobody is removed.** "No reactions" must never be
+  read as "nobody cleaned". After the deadline such a week only gets its status
+  set, so it stops nagging.
+- **A follow-up DM sent in this very run defers the closing to the next one.**
+  Otherwise a missed Monday would mean the deadline was zero seconds long.
+
+`slack_utils.slack_id_fuer` honours `SLACK_TEST_USER_ID` exactly like the DMs do:
+in the sandbox all members resolve to the test user, so one :broom: from that
+user confirms the whole crew. That is the only way to exercise this path there —
+the real addresses do not exist in the sandbox.
+
+Reading the channel needs the **`channels:history`** scope (`groups:history` if
+the channel ever becomes private) and the bot must be a member of the channel.
+The exact reactor list is fetched with `reactions.get`, not taken from
+`conversations_history`, because the `users` list there can be truncated — and a
+truncated list would read as "did not clean".
+
 ## How the reschedule flow works
 
 There is **no webhook server**. `python main.py poll` runs several times a day (`.github/workflows/poll_reactions.yml`) and asks Slack whether anyone reacted. Socket Mode replaces this later (Phase 9); the state handling below is identical either way.
@@ -151,6 +213,12 @@ Two consequences worth remembering:
 A member is only removed from their old week once a **valid** target week is confirmed — otherwise a week could silently end up understaffed when someone declines and never answers.
 
 The bot **pre-seeds ✅ and ❌ on its own draw DM** (`PREFILL_REACTIONS`, needs the `reactions:write` scope) so a member only has to click, instead of having to think of reacting and then hit the right emoji — an unrecognised emoji does nothing at all, silently. This only works because `read_dm_history` drops reactions whose only reactor is the bot itself, via `eigene_user_id()` (`auth.test`, cached). Without that filter every draw DM would look like a ❌ and the next poll would ask the whole crew to reschedule. If the bot's own ID cannot be determined, `read_dm_history` deliberately reports *no* reactions at all and says so loudly: a missed reaction is caught by the next poll, a mass false alarm is not.
+
+Both evaluations follow the rule "the newest bot message wins", so each one
+filters the history down to **its own message family** first
+(`config.RESCHEDULE_EVENTS` / `config.ERLEDIGT_EVENTS`). Without that, an
+Erledigt follow-up DM would be the newest message and permanently block a ❌ on
+an older draw DM.
 
 Every bot DM carries the member's Notion ID in its metadata payload, and `reschedule.verlauf_fuer` drops bot messages belonging to someone else before the state machine runs. In production each member has their own DM channel, so this filters nothing — but with `SLACK_TEST_USER_ID` *all* DMs land in one channel, and without it a single ❌ would move the whole crew of that week. That is also why the swap confirmation carries `META_BESTAETIGUNG`: an untagged confirmation would anchor every member's scan, not just its recipient's.
 

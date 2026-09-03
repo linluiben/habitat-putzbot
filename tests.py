@@ -25,6 +25,7 @@ import reschedule  # noqa: E402
 import scheduler  # noqa: E402
 import slack_utils  # noqa: E402
 import tagcheck  # noqa: E402
+import tracking  # noqa: E402
 
 TODAY = date.today()
 FAILS = []
@@ -185,7 +186,7 @@ def test_plan_flow():
         writes.append(("create", kw, year, len(ids), status)) or (f"page-{kw}", f"https://notion.so/kw{kw}")
     )
     slack_utils.get_slack_user_id = lambda email: f"U{email.split('@')[0].upper()}" if email else None
-    slack_utils.post_channel = lambda text, channel=None: True
+    slack_utils.post_channel = lambda text, channel=None, metadata=None, reaktionen=(): "1.0"
     slack_utils.send_dm = lambda m, text, metadata=None, reaktionen=(): "123.456"
 
     try:
@@ -245,7 +246,9 @@ def test_draw_flow():
     writes, dms, posts = [], [], []
     restore = _fake_slack_notion(writes, dms, {})
     # _fake_slack_notion verschluckt die Kanalnachricht — hier wollen wir sie sehen.
-    slack_utils.post_channel = lambda text, channel=None: posts.append(text) or True
+    slack_utils.post_channel = lambda text, channel=None, metadata=None, reaktionen=(): (
+        posts.append((text, metadata, tuple(reaktionen))) or "1.0"
+    )
 
     try:
         members = [member(f"N{i}", new=True) for i in range(6)] + [member(f"A{i}") for i in range(6)]
@@ -268,10 +271,16 @@ def test_draw_flow():
 
         check("KEINE DMs verschickt", dms, [])
         check("genau eine Kanalnachricht", len(posts), 1)
-        check("Nachricht nennt die KW", "KW 32" in posts[0], True)
-        check("Freiwillige werden getrennt gedankt", "freiwillige" in posts[0].lower(), True)
-        check("Ausgeloste werden genannt", "Ausgelost" in posts[0], True)
-        check("Link zur Seite dabei", "u32" in posts[0], True)
+        text, metadata, reaktionen = posts[0]
+        check("Nachricht nennt die KW", "KW 32" in text, True)
+        check("Freiwillige werden getrennt gedankt", "freiwillige" in text.lower(), True)
+        check("Ausgeloste werden genannt", "Ausgelost" in text, True)
+        check("Link zur Seite dabei", "u32" in text, True)
+        check("Besen-Bestaetigung wird erklaert", f":{config.PUTZ_REACTION}:" in text, True)
+        check("Metadata traegt KW und Jahr",
+              (metadata["event_type"], metadata["event_payload"]),
+              (config.META_WOCHE, {"kw": 32, "jahr": 2026}))
+        check("Besen ist vorgesetzt", reaktionen, (config.PUTZ_REACTION,))
 
         # KW 33 ist die erste Woche des Folgezyklus — der darf NICHT mitgeplant
         # werden, auch wenn KW 32 die letzte Woche von Zyklus 8 ist.
@@ -433,7 +442,7 @@ def _fake_slack_notion(writes, dms, verlauf_pro_mitglied):
         or (f"page-{kw}-{jahr}", f"https://notion.so/kw{kw}")
     )
     slack_utils.get_slack_user_id = lambda email: "U1"
-    slack_utils.post_channel = lambda text, channel=None: True
+    slack_utils.post_channel = lambda text, channel=None, metadata=None, reaktionen=(): "1.0"
     slack_utils.send_dm = lambda m, text, metadata=None, reaktionen=(): (
         dms.append((m["id"], (metadata or {}).get("event_type"), text)) or "9.9"
     )
@@ -634,13 +643,22 @@ def test_post_channel_schalter():
 
     original_dry, original_dm = slack_utils.DRY_RUN, slack_utils.DM_ONLY
     try:
-        # Kein Monkeypatching von slack: kommt die Funktion bis zum Senden,
-        # ist der Schalter wirkungslos und der Test soll scheitern.
-        slack_utils.DRY_RUN, slack_utils.DM_ONLY = True, False
-        check("DRY_RUN unterdrückt den Versand", slack_utils.post_channel("Test"), True)
+        # Der Rückgabewert ist inzwischen der Message-Timestamp, taugt also nicht
+        # mehr als Beweis. Stattdessen wird der Versand selbst beobachtet: kommt
+        # die Funktion bis dorthin, ist der Schalter wirkungslos.
+        versuche = []
+        original_post = slack_utils.slack.chat_postMessage
+        slack_utils.slack.chat_postMessage = lambda **kw: versuche.append(kw)
+        try:
+            slack_utils.DRY_RUN, slack_utils.DM_ONLY = True, False
+            slack_utils.post_channel("Test")
+            check("DRY_RUN unterdrückt den Versand", versuche, [])
 
-        slack_utils.DRY_RUN, slack_utils.DM_ONLY = False, True
-        check("DM_ONLY unterdrückt den Versand", slack_utils.post_channel("Test"), False)
+            slack_utils.DRY_RUN, slack_utils.DM_ONLY = False, True
+            slack_utils.post_channel("Test")
+            check("DM_ONLY unterdrückt den Versand", versuche, [])
+        finally:
+            slack_utils.slack.chat_postMessage = original_post
     finally:
         slack_utils.DRY_RUN, slack_utils.DM_ONLY = original_dry, original_dm
 
@@ -817,6 +835,229 @@ def test_tagcheck():
         tagcheck._lookup = original
 
 
+# ------------------------------------------------------------- Erledigt-Tracking
+
+def _tracking_welt(woche_kw, member_ids, reagierende, verlaeufe, nachricht=True,
+                   status="Crew voll"):
+    """Welt fuer den Erledigt-Abgleich. Gibt (writes, dms, week_pages, lookup) zurueck."""
+    members = [member(f"M{i}") for i in range(8)]
+    lookup = {m["id"]: m for m in members}
+
+    woche = {"page_id": f"p{woche_kw}", "page_url": f"u{woche_kw}", "kw": woche_kw,
+             "year": 2026, "member_ids": list(member_ids),
+             "member_count": len(member_ids), "status": status, "archiv": False}
+    week_pages = {"by_week": {(woche_kw, 2026): woche},
+                  "by_page_id": {woche["page_id"]: woche}}
+
+    writes, dms = [], []
+    restore = _fake_slack_notion(writes, dms, verlaeufe)
+    original = (slack_utils.finde_wochennachrichten, slack_utils.reagierende_user,
+                slack_utils.slack_id_fuer, slack_utils.email_fuer_user)
+    slack_utils.finde_wochennachrichten = lambda oldest=None, channel=None: (
+        {(woche_kw, 2026): "111.1"} if nachricht else {}
+    )
+    slack_utils.reagierende_user = lambda ts, emoji, channel=None: set(reagierende)
+    slack_utils.slack_id_fuer = lambda m: f"U{m['id']}"
+    slack_utils.email_fuer_user = lambda uid: f"{uid[1:]}@das-habitat.de"
+    return writes, dms, week_pages, lookup, restore, original
+
+
+def _tracking_lauf(heute_kw, **kwargs):
+    writes, dms, week_pages, lookup, restore, original = _tracking_welt(**kwargs)
+    try:
+        tracking.run_abgleich(week_pages, lookup, heute_kw, 2026)
+    finally:
+        (slack_utils.finde_wochennachrichten, slack_utils.reagierende_user,
+         slack_utils.slack_id_fuer, slack_utils.email_fuer_user) = original
+        restore()
+    return writes, dms, week_pages
+
+
+def test_tracking_fenster():
+    print("\n=== Erledigt: welche Wochen werden ueberhaupt angefasst ===")
+
+    def woche(kw, jahr=2026, status="Crew voll", archiv=False):
+        return {"page_id": f"p{kw}", "page_url": "", "kw": kw, "year": jahr,
+                "member_ids": [], "member_count": 0, "status": status, "archiv": archiv}
+
+    week_pages = {"by_week": {}, "by_page_id": {}}
+    for eintrag in [
+        woche(30),                                  # vor TRACKING_START
+        woche(36),                                  # vor TRACKING_START
+        woche(37),                                  # zu weit zurueck (Lookback)
+        woche(42),                                  # dran
+        woche(43),                                  # dran
+        woche(44),                                  # laufende Woche
+        woche(45),                                  # Zukunft
+        woche(41, status=config.WEEK_STATUS_DONE),  # schon abgeschlossen
+        woche(40, status=config.WEEK_STATUS_BLOCKED),
+        woche(39, archiv=True),
+    ]:
+        week_pages["by_week"][(eintrag["kw"], eintrag["year"])] = eintrag
+
+    offen = [w["kw"] for w, _ in tracking.offene_wochen(week_pages, 44, 2026)]
+    check("nur die offenen Vergangenheitswochen", offen, [42, 43])
+    check("Reihenfolge: aelteste zuerst", offen, sorted(offen))
+
+    check("Start-Grenze haengt an der Konstante",
+          (config.TRACKING_START_KW, config.TRACKING_START_YEAR), (37, 2026))
+
+
+def test_tracking_abgleich():
+    print("\n=== Erledigt: Abgleich fragt die Stillen ===")
+    # KW 43 liegt eine Woche zurueck -> Nachfragen, aber noch kein Abschluss.
+    writes, dms, week_pages = _tracking_lauf(
+        44, woche_kw=43, member_ids=["M0", "M1", "M2", "M3"],
+        reagierende={"UM0", "UM1"}, verlaeufe={})
+
+    check("nichts in Notion geschrieben", writes, [])
+    check("zwei Nachfragen", len(dms), 2)
+    check("... an die Stillen", sorted(d[0] for d in dms), ["M2", "M3"])
+    check("... mit Erledigt-Metadata",
+          {d[1] for d in dms}, {config.META_ERLEDIGT_FRAGE})
+    check("Woche bleibt offen", week_pages["by_week"][(43, 2026)]["status"], "Crew voll")
+
+    print("\n=== Erledigt: Abschluss traegt die Stillen aus ===")
+    gefragt = {
+        "M2": [bot_msg(config.META_ERLEDIGT_FRAGE,
+                       {"kw": 42, "jahr": 2026, "mitglied": "M2", "art": "ausgelost"})],
+        "M3": [bot_msg(config.META_ERLEDIGT_FRAGE,
+                       {"kw": 42, "jahr": 2026, "mitglied": "M3", "art": "ausgelost"},
+                       reaktionen=["white_check_mark"])],
+    }
+    writes, dms, week_pages = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0", "M1", "M2", "M3"],
+        reagierende={"UM0", "UM1"}, verlaeufe=gefragt)
+
+    updates = [w for w in writes if w[0] == "update"]
+    check("genau ein Notion-Update", len(updates), 1)
+    check("M2 ist raus (keine Antwort)", "M2" in updates[0][2], False)
+    check("M3 bleibt drin (per PM bestaetigt)", "M3" in updates[0][2], True)
+    check("die Besen-Klicker bleiben drin",
+          [mid for mid in ("M0", "M1") if mid in updates[0][2]], ["M0", "M1"])
+    check("Status auf Erledigt",
+          [w for w in writes if w[0] == "status"], [("status", "p42", config.WEEK_STATUS_DONE)])
+    check("nur der Ausgetragene bekommt eine Abschluss-PM",
+          [(d[0], d[1]) for d in dms], [("M2", config.META_ERLEDIGT_ABSCHLUSS)])
+    check("Cache kennt die neue Belegung",
+          week_pages["by_week"][(42, 2026)]["member_count"], 3)
+
+    print("\n=== Erledigt: PM-Nein traegt aus, mit Begruendung ===")
+    nein = {"M2": [bot_msg(config.META_ERLEDIGT_FRAGE,
+                           {"kw": 42, "jahr": 2026, "mitglied": "M2", "art": "ausgelost"},
+                           reaktionen=["x"])]}
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0", "M2"], reagierende={"UM0"}, verlaeufe=nein)
+    updates = [w for w in writes if w[0] == "update"]
+    check("M2 ist raus", updates[0][2], ["M0"])
+    check("Begruendung nennt die Nachfrage", "❌" in dms[0][2], True)
+
+    print("\n=== Erledigt: unerwarteter Helfer ===")
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=43, member_ids=["M0"], reagierende={"UM0", "UM5"}, verlaeufe={})
+    check("Nachfrage an den Helfer", [(d[0], d[1]) for d in dms],
+          [("M5", config.META_ERLEDIGT_FRAGE)])
+    check("... und zwar die Zusatz-Variante", "mitgeputzt" in dms[0][2], True)
+
+    ja = {"M5": [bot_msg(config.META_ERLEDIGT_FRAGE,
+                         {"kw": 42, "jahr": 2026, "mitglied": "M5", "art": "zusatz"},
+                         reaktionen=["white_check_mark"])]}
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0"], reagierende={"UM0", "UM5"}, verlaeufe=ja)
+    updates = [w for w in writes if w[0] == "update"]
+    check("Helfer wird eingetragen", updates[0][2], ["M0", "M5"])
+    check("... und bekommt Bescheid",
+          [(d[0], d[1]) for d in dms], [("M5", config.META_ERLEDIGT_ABSCHLUSS)])
+
+    print("\n=== Erledigt: ohne Wochennachricht wird niemand ausgetragen ===")
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0", "M1"], reagierende=set(), verlaeufe={},
+        nachricht=False)
+    check("kein Mitglieder-Update", [w for w in writes if w[0] == "update"], [])
+    check("keine PMs", dms, [])
+    check("Woche wird trotzdem geschlossen",
+          [w for w in writes if w[0] == "status"],
+          [("status", "p42", config.WEEK_STATUS_DONE)])
+
+    print("\n=== Erledigt: verpasster Lauf verkuerzt die Frist nicht ===")
+    # KW 42 ist laengst faellig, es wurde aber nie gefragt (ausgefallener Montag).
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0", "M1"], reagierende={"UM0"}, verlaeufe={})
+    check("erst mal nur fragen", [(d[0], d[1]) for d in dms],
+          [("M1", config.META_ERLEDIGT_FRAGE)])
+    check("kein Abschluss im selben Lauf", writes, [])
+
+    print("\n=== Erledigt: alles bestaetigt ===")
+    writes, dms, _ = _tracking_lauf(
+        44, woche_kw=42, member_ids=["M0", "M1"], reagierende={"UM0", "UM1"}, verlaeufe={})
+    check("kein Mitglieder-Update noetig", [w for w in writes if w[0] == "update"], [])
+    check("keine PMs", dms, [])
+    check("nur der Status wird gesetzt",
+          [w for w in writes if w[0] == "status"],
+          [("status", "p42", config.WEEK_STATUS_DONE)])
+
+
+def test_nachrichtenfamilien():
+    """Erledigt-PMs duerfen den Reschedule-Verlauf nicht abriegeln — und umgekehrt.
+
+    Beide Auswertungen arbeiten nach "die neueste eigene Nachricht entscheidet".
+    Ohne Trennung waere eine Nachfrage 'warst du putzen?' der neueste Anker und
+    ein ❌ auf einer aelteren Auslos-DM fuer immer wirkungslos.
+    """
+    print("\n=== Nachrichtenfamilien trennen ===")
+
+    auslosung = bot_msg(config.META_AUSLOSUNG,
+                        {"kw": 45, "jahr": 2026, "mitglied": "M0"}, ["x"], ts="1")
+    erledigt = bot_msg(config.META_ERLEDIGT_FRAGE,
+                       {"kw": 43, "jahr": 2026, "mitglied": "M0"}, ts="5")
+    verlauf = [erledigt, auslosung]  # neueste zuerst
+
+    check("Reschedule sieht die Erledigt-PM nicht",
+          reschedule.naechster_zustand(reschedule.verlauf_fuer(verlauf, "M0"),
+                                       {(45, 2026)}),
+          ("absage", (45, 2026)))
+
+    m0 = member("M0")
+    check("Erledigt sieht die Auslos-DM nicht",
+          tracking.antwort_auf_nachfrage(verlauf, m0, 43, 2026), (None, True))
+    check("... und findet die Antwort in seiner eigenen Familie",
+          tracking.antwort_auf_nachfrage(
+              [bot_msg(config.META_ERLEDIGT_FRAGE,
+                       {"kw": 43, "jahr": 2026, "mitglied": "M0"},
+                       reaktionen=["white_check_mark"])], m0, 43, 2026),
+          ("ja", True))
+    check("fremde Woche zaehlt nicht als gefragt",
+          tracking.antwort_auf_nachfrage(verlauf, m0, 42, 2026), (None, False))
+
+
+def test_wochennachricht_metadata():
+    print("\n=== Wochennachricht traegt Metadata und Besen ===")
+
+    posts = []
+    original = (slack_utils.post_channel, slack_utils.get_slack_user_id)
+    slack_utils.post_channel = lambda text, channel=None, metadata=None, reaktionen=(): (
+        posts.append((text, metadata, tuple(reaktionen))) or "1.0"
+    )
+    slack_utils.get_slack_user_id = lambda email: "U1"
+    try:
+        crew = [member("M0")]
+        woche = {"page_id": "p", "page_url": "u", "kw": 44, "year": 2026,
+                 "member_ids": ["M0"], "member_count": 1, "status": "Crew voll",
+                 "archiv": False}
+        week_pages = {"by_week": {(44, 2026): woche}, "by_page_id": {"p": woche}}
+        scheduler.remind_current_week(week_pages, {"M0": crew[0]}, 44, 2026)
+    finally:
+        slack_utils.post_channel, slack_utils.get_slack_user_id = original
+
+    check("genau eine Nachricht", len(posts), 1)
+    text, metadata, reaktionen = posts[0]
+    check("Metadata nennt KW und Jahr", metadata["event_payload"], {"kw": 44, "jahr": 2026})
+    check("Event-Typ ist die Wochennachricht", metadata["event_type"], config.META_WOCHE)
+    check("Besen vorgesetzt", reaktionen, (config.PUTZ_REACTION,))
+    check("Text erklaert den Besen", f":{config.PUTZ_REACTION}:" in text, True)
+    check("... und nennt kein Daumen-Emoji", "thumbsup" in text, False)
+
+
 def main():
     test_cycles()
     test_raffle()
@@ -828,6 +1069,10 @@ def main():
     test_eigene_reaktionen_filtern()
     test_reaktionen_vorsetzen()
     test_post_channel_schalter()
+    test_tracking_fenster()
+    test_tracking_abgleich()
+    test_nachrichtenfamilien()
+    test_wochennachricht_metadata()
     test_filter_umfang()
     test_clean_string()
     test_tagcheck()

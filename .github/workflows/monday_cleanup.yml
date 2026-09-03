@@ -14,6 +14,7 @@ on:
           - draw
           - plan
           - weekly
+          - erledigt
         default: draw            # ⇦ Übergangsphase, siehe unten
       dry_run:
         description: 'Dry Run — nichts in Notion/Slack schreiben'
