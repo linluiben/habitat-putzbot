@@ -455,7 +455,7 @@ def build_bestaetigungs_hinweis():
         f"\n\n*Wenn ihr geputzt habt, reagiert bitte auf diese Nachricht mit* :{PUTZ_REACTION}:, "
         f"damit ich erkenne, wer wirklich da war.\n"
         f"_Nur für die, die diese Woche tatsächlich geputzt haben. Wer nicht dazu gekommen ist, klickt einfach nichts "
-        f"und wer spontan mitgeholfen hat, darf auch klicken - ich frage dann nochmal per PM nach."
+        f"und wer spontan mitgeholfen hat, darf auch klicken - ich frage dann nochmal per PM nach. "
         f"Nutzt gerne auch den Thread, um euch abzusprechen und mitzuteilen, was geputzt wurde._"
     )
 
