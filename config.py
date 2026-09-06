@@ -217,7 +217,12 @@ CHANNEL_HISTORY_LIMIT = 200   # so viele Kanal-Nachrichten pro Rueckblick ansehe
 # Frage: wer hat tatsaechlich geputzt? Bisher zaehlt der Bot nur Zuteilungen,
 # nicht Erledigungen — wer eingetragen war und nicht kam, sieht fuer die
 # Fairness-Rechnung aus wie jemand, der da war ("hat ja letztens erst").
-TRACKING_ENABLED = True
+# Default an: der Normalbetrieb soll ohne gesetzte Variable funktionieren, damit
+# in GitHub kein weiteres Secret noetig ist. Nur zum Stummschalten setzt man
+# TRACKING_ENABLED=false — dann traegt die Wochennachricht weder Metadata noch
+# vorgesetzten Besen, der Erklaerabsatz entfaellt ebenfalls, und es wird nichts
+# ausgewertet.
+TRACKING_ENABLED = os.environ.get("TRACKING_ENABLED", "true").lower() == "true"
 
 # Erste Woche, die ueberhaupt ausgewertet wird. UNBEDINGT gesetzt lassen: ohne
 # diese Grenze wuerde der erste Lauf die komplette Historie "abschliessen" und

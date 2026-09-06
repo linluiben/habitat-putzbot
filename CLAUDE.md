@@ -7,6 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 "Putzbot" — a scheduled bot that runs the cleaning-crew ("Putzplan") lottery for a club (das-habitat.de). It reads member and cleaning-schedule data from two linked Notion data sources, draws members to fill upcoming weeks' crews, writes the result back to Notion, and notifies people via Slack. It runs unattended via GitHub Actions (`.github/workflows/monday_cleanup.yml`) on a cron (Mondays 08:00 UTC) or manually via `workflow_dispatch`.
 
 Two scheduled workflows drive production (`monday_cleanup.yml`, `poll_reactions.yml`).
+`monday_cleanup.yml` runs the Erledigt-Abgleich as a **second step** whenever the mode is
+`draw` or `plan` — those two do not call it themselves, and without that step the tracking
+would simply not happen during the changeover. Under `weekly` the step drops out, because
+`weekly` already runs the Abgleich itself.
 
 ⚠️ **`monday_cleanup.yml` is temporarily running `draw` instead of `weekly`** — through KW 36 (2026-08-31), during the V2→V3 changeover. The mode is a literal in the `run:` line, marked `⇦`, alongside the `modus` dispatch input. Both revert to `weekly` from KW 37. Do not "fix" this back without reading the Umstiegsplan in [implementation-plan.md](docs/implementation-plan.md): `weekly` never draws anybody, so switching early leaves weeks with no crew and no message at all.
 
@@ -74,6 +78,7 @@ There is no test framework; `tests.py` is a plain script that fakes the Notion/S
 | `SLACK_TEST_USER_ID` | If set, **all** DMs are redirected to this user (sandbox testing — see [sandbox-setup.md](docs/sandbox-setup.md)) |
 | `HEUTE_KW`, `HEUTE_JAHR` | **Test only.** Run as if it were that ISO week. The Erledigt-Tracking evaluates *past* weeks, so without this the three-step flow could only be tested across three real Mondays. Set in `sandbox_test.yml` only; `main.py` prints a loud warning when it is active. |
 | `TRACKING_START_KW`, `TRACKING_START_YEAR`, `TRACKING_DEADLINE_WEEKS` | Override the tracking window (defaults 37 / 2026 / 1). Same purpose: make the flow testable in one sitting. |
+| `TRACKING_ENABLED` | Defaults to **true** — no secret needed for normal operation. `"false"` mutes the whole feature: the week message carries no metadata and no pre-seeded :broom:, the paragraph asking people to click is dropped, and nothing is evaluated. All three hang on the one switch on purpose — asking for a click nobody reads is worse than not asking. |
 | `SANDBOX` | `"true"` → switch Slack to the sandbox workspace |
 | `SANDBOX_SLACK_TOKEN`, `SANDBOX_SLACK_CHANNEL_ID` | Required when `SANDBOX=true`; config aborts rather than falling back to the real workspace |
 | `SANDBOX_SLACK_TEST_USER_ID` | Sandbox DM target — a *different* user ID than in the real workspace |

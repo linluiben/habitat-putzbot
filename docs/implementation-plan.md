@@ -345,6 +345,31 @@ eingetragen war) — dafür braucht es einen zweiten Sandbox-User, weil mit
 **Noch offen:** produktiver Erstlauf und die Ankündigung im Kanal, dass ab sofort der
 Besen geklickt wird.
 
+### Nachtrag 03.09.: Tracking läuft unabhängig vom Plan-Modus
+
+Das Tracking hängt an der **Wochennachricht**, nicht an der Auslosung — `draw` postet sie
+mit Metadata und Besen genauso wie die `weekly`-Erinnerung. Nur *ausgewertet* wird in
+`draw`/`plan` nicht, deshalb ruft `monday_cleanup.yml` den Modus `erledigt` als zweiten
+Schritt auf, solange der Workflow nicht auf `weekly` steht.
+
+`TRACKING_ENABLED` kommt jetzt aus der Umgebung (Default **true**, damit im Normalbetrieb
+kein Secret nötig ist) und schaltet auch den Erklärabsatz ab. Vorher hätte `False` zum
+Besen-Klick aufgefordert, ohne ihn vorzusetzen oder je auszuwerten.
+
+### Korrektur am Fahrplan (Stand 06.09., KW 36 ist vorbei)
+
+Die Ankündigung steht weiterhin aus, `plan` ist nie gelaufen. Ein Wechsel auf `weekly` in
+KW 38 würde **KW 38–40 unbesetzt lassen**: KW 37 liegt in Zyklus 10 (KW 37–40), ein
+`plan`-Lauf plant immer den *Folge*zyklus, also KW 41–44 — und `weekly` lost selbst nie
+aus. Der Fahrplan verschiebt sich damit um einen Zyklus:
+
+| Wann | Modus | Was passiert |
+|---|---|---|
+| Mo, KW 37–40 | `draw` (Cron) | wie gehabt auffüllen + Kanalnachricht; der zweite Schritt macht ab KW 38 den Erledigt-Abgleich |
+| in KW 40 | `plan`, manuell | Zyklus 11 (KW 41–44) mit DMs und Reschedule |
+| davor, von Hand | Ankündigung | Zyklusplanung, DMs, Tausch per ❌ **und** Besen-Bestätigung in einem Aufwasch |
+| ab KW 41 | `weekly` | Normalbetrieb, Abgleich läuft dann von selbst mit |
+
 ## Verhalten bei manuellen Notion-Änderungen (geprüft 01.09.2026)
 
 Nichts davon zerstört Daten, aber es gibt zwei **stille** Lücken:
