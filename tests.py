@@ -1058,6 +1058,36 @@ def test_wochennachricht_metadata():
     check("... und nennt kein Daumen-Emoji", "thumbsup" in text, False)
 
 
+def test_tracking_schalter():
+    """TRACKING_ENABLED=False muss ALLES abschalten, auch die Aufforderung.
+
+    Sonst stuende unter der Wochennachricht 'klickt auf :broom:', waehrend der
+    Bot weder das Emoji vorsetzt noch je hinschaut — eine Bitte ins Leere.
+    """
+    print("\n=== Tracking-Schalter greift ueberall ===")
+
+    posts = []
+    original = (slack_utils.post_channel, slack_utils.get_slack_user_id,
+                slack_utils.TRACKING_ENABLED, scheduler.TRACKING_ENABLED)
+    slack_utils.post_channel = lambda text, channel=None, metadata=None, reaktionen=(): (
+        posts.append((text, metadata, tuple(reaktionen))) or "1.0"
+    )
+    slack_utils.get_slack_user_id = lambda email: "U1"
+    slack_utils.TRACKING_ENABLED = scheduler.TRACKING_ENABLED = False
+    try:
+        scheduler.post_wochennachricht(slack_utils.build_reminder(44, [member("M0")], "u"),
+                                       44, 2026)
+    finally:
+        (slack_utils.post_channel, slack_utils.get_slack_user_id,
+         slack_utils.TRACKING_ENABLED, scheduler.TRACKING_ENABLED) = original
+
+    text, metadata, reaktionen = posts[0]
+    check("keine Metadata", metadata, None)
+    check("kein vorgesetzter Besen", reaktionen, ())
+    check("kein Aufruf zum Klicken", config.PUTZ_REACTION in text, False)
+    check("die Erinnerung steht trotzdem", "KW 44" in text, True)
+
+
 def main():
     test_cycles()
     test_raffle()
@@ -1073,6 +1103,7 @@ def main():
     test_tracking_abgleich()
     test_nachrichtenfamilien()
     test_wochennachricht_metadata()
+    test_tracking_schalter()
     test_filter_umfang()
     test_clean_string()
     test_tagcheck()

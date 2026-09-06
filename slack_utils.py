@@ -15,6 +15,7 @@ from config import (
     RESCHEDULE_ENABLED,
     SLACK_CHANNEL_ID,
     SLACK_TEST_USER_ID,
+    TRACKING_ENABLED,
     debug,
     slack,
 )
@@ -443,7 +444,13 @@ def build_bestaetigungs_hinweis():
     Steht unter jeder Wochennachricht, weil die Reaktion sonst niemand als
     Aufforderung liest — und weil ein Emoji ohne Erklärung genauso gut
     "gesehen" heißen kann.
+
+    Hängt am selben Schalter wie die Auswertung: ohne `TRACKING_ENABLED` würde
+    hier sonst zum Klicken aufgefordert, während der Bot weder den Besen
+    vorsetzt noch je hinschaut — die Aufforderung liefe ins Leere.
     """
+    if not TRACKING_ENABLED:
+        return ""
     return (
         f"\n\n*Wenn ihr geputzt habt, klickt hier auf* :{PUTZ_REACTION}: — "
         f"daran erkenne ich, wer wirklich dran war.\n"

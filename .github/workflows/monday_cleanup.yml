@@ -81,3 +81,26 @@ jobs:
           FORCE_PLAN: ${{ inputs.force_plan }}
         # Bei Cron-Läufen ist `inputs.modus` leer -> der feste Wert greift.
         run: python main.py ${{ inputs.modus || 'draw' }}   # ⇦
+
+      # `weekly` ruft den Erledigt-Abgleich selbst auf, `draw`/`plan` nicht.
+      # Solange die Übergangsphase läuft, würde das Tracking also gar nicht
+      # stattfinden — deshalb hier als eigener Schritt hinterher. Ab `weekly`
+      # entfällt er von selbst (sonst liefe der Abgleich zweimal pro Montag).
+      #
+      # Bewusst OHNE `always()`: scheitert vorher etwas — allen voran die Tests
+      # —, soll hier nichts mehr geschrieben und niemand angeschrieben werden.
+      # Ein ausgefallener Montag kostet nichts: der Abgleich holt die Woche beim
+      # nächsten Lauf nach, und eine gerade erst verschickte Nachfrage verschiebt
+      # den Abschluss ohnehin auf den Lauf danach.
+      - name: Erledigt-Abgleich
+        if: ${{ contains(fromJSON('["draw","plan"]'), inputs.modus || 'draw') }}
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          DS_A_ID: ${{ secrets.DS_A_ID }}
+          DS_B_ID: ${{ secrets.DS_B_ID }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          TEMPLATE_ID: ${{ secrets.TEMPLATE_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DEBUG: ${{ inputs.debug }}
+        run: python main.py erledigt
