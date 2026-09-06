@@ -452,11 +452,11 @@ def build_bestaetigungs_hinweis():
     if not TRACKING_ENABLED:
         return ""
     return (
-        f"\n\n*Wenn ihr geputzt habt, klickt hier auf* :{PUTZ_REACTION}: — "
-        f"daran erkenne ich, wer wirklich dran war.\n"
-        f"_Nur für die, die diese Woche tatsächlich geputzt haben. Wer nicht dazu "
-        f"gekommen ist, klickt einfach nichts — ich frage nächste Woche kurz per "
-        f"PM nach. Wer spontan mitgeholfen hat, darf auch klicken._"
+        f"\n\n*Wenn ihr geputzt habt, reagiert bitte auf diese Nachricht mit* :{PUTZ_REACTION}:, "
+        f"damit ich erkenne, wer wirklich da war.\n"
+        f"_Nur für die, die diese Woche tatsächlich geputzt haben. Wer nicht dazu gekommen ist, klickt einfach nichts "
+        f"und wer spontan mitgeholfen hat, darf auch klicken - ich frage dann nochmal per PM nach."
+        f"Nutzt gerne auch den Thread, um euch abzusprechen und mitzuteilen, was geputzt wurde._"
     )
 
 
@@ -470,7 +470,7 @@ def build_erledigt_frage(member, kw, art, frist_text):
         return (
             f"Hallo {vorname(member)}! 🧹\n\n"
             f"Du hast unter der Nachricht zu *KW {kw}* auf :{PUTZ_REACTION}: geklickt, "
-            f"standst dort aber gar nicht im Putzplan. Hast du mitgeputzt?\n"
+            f"standest dort aber gar nicht im Putzplan. Hast du mitgeputzt?\n"
             f"✅ = ja, trag mich bitte ein\n"
             f"❌ = nein, das war ein Versehen\n\n"
             f"_Wenn ich bis {frist_text} nichts höre, lasse ich KW {kw} so, wie sie ist._"
@@ -498,7 +498,7 @@ def build_erledigt_ausgetragen(member, kw, grund):
     return (
         f"Ich habe dich wieder aus *KW {kw}* ausgetragen: {grund}.\n\n"
         f"Die Woche zählt damit nicht als dein Putzeinsatz — du kommst also früher "
-        f"wieder in den Lostopf. Falls das nicht stimmt, meld dich einfach kurz."
+        f"wieder in den Lostopf. Falls das nicht stimmt, meld dich einfach kurz bei Team Gemütlichkeit."
     )
 
 
@@ -556,7 +556,7 @@ def build_reschedule_fehler(member, eingabe, grund, max_kw_hinweis, link=None):
     )
     if link:
         text += (
-            f"\n\n👉 <{link}|Hier siehst du die Woche in Notion> — "
+            f"\n\n👉 <{link}|Hier siehst du die Wochen in Notion> — "
             f"such dir von dort eine mit weniger als 4 Leuten aus."
         )
     return text
