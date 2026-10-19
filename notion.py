@@ -1,6 +1,7 @@
 """Alle Notion-Zugriffe: Queries, Lookups, Schreiboperationen."""
 
 import re
+import time
 import unicodedata
 
 import requests
@@ -45,6 +46,47 @@ def clean_string(text):
 
 # --- Low-Level ---
 
+# Notion steht hinter Cloudflare und liefert ab und zu ein kurzes 502/503/504
+# oder ein 429 — ein einziger solcher Treffer hat schon einen ganzen
+# Montagslauf abgebrochen. Deshalb wird jeder Aufruf ein paar Mal wiederholt.
+RETRY_STATUS = {429, 500, 502, 503, 504}
+RETRY_WAITS = (2, 5, 15)
+
+
+def _request(method, url, wiederholbar=True, **kwargs):
+    """HTTP-Aufruf an Notion, mit Wiederholung bei vorübergehenden Fehlern.
+
+    `wiederholbar=False` für Aufrufe, die nicht idempotent sind (Seite
+    anlegen): ein 502 heißt nicht, dass Notion die Seite *nicht* angelegt hat,
+    und ein zweiter Versuch ergäbe dann eine doppelte Woche. Dort wird nur bei
+    429 wiederholt — das sagt verbindlich, dass nichts passiert ist.
+    """
+    kwargs.setdefault("headers", HEADERS)
+    kwargs.setdefault("timeout", 60)
+
+    for versuch, warten in enumerate((*RETRY_WAITS, None), start=1):
+        try:
+            response = requests.request(method, url, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if not wiederholbar or warten is None:
+                raise
+            print(f"   ⚠️ Notion nicht erreichbar ({e.__class__.__name__}), Versuch {versuch} — neuer Versuch in {warten}s.")
+            time.sleep(warten)
+            continue
+
+        nochmal = response.status_code == 429 or (wiederholbar and response.status_code in RETRY_STATUS)
+        if not nochmal or warten is None:
+            return response
+
+        if response.status_code == 429:
+            try:
+                warten = max(warten, float(response.headers.get("Retry-After", 0)))
+            except ValueError:
+                pass
+        print(f"   ⚠️ Notion antwortet {response.status_code}, Versuch {versuch} — neuer Versuch in {warten:g}s.")
+        time.sleep(warten)
+
+
 def query_data_source(ds_id, filter_payload=None):
     """Query mit Pagination — Notion liefert max. 100 Seiten pro Request."""
     url = f"{NOTION_API}/data_sources/{ds_id}/query"
@@ -58,7 +100,7 @@ def query_data_source(ds_id, filter_payload=None):
         if cursor:
             payload["start_cursor"] = cursor
 
-        response = requests.post(url, json=payload, headers=HEADERS)
+        response = _request("POST", url, json=payload)
         if response.status_code != 200:
             print(f"❌ Notion-Query fehlgeschlagen ({ds_id}): {response.text}")
             return None
@@ -168,10 +210,10 @@ def update_page_members(page_id, member_ids):
         print(f"   🧪 [DRY RUN] würde Seite {page_id} auf {len(member_ids)} Mitglieder setzen.")
         return True
 
-    response = requests.patch(
+    response = _request(
+        "PATCH",
         f"{NOTION_API}/pages/{page_id}",
         json={"properties": {"Mitglieder": {"relation": [{"id": mid} for mid in member_ids]}}},
-        headers=HEADERS,
     )
     if response.status_code == 200:
         print(f"   ✅ Seite geupdated ({len(member_ids)} Mitglieder).")
@@ -203,7 +245,7 @@ def create_week_page(kw, year, member_ids, status=WEEK_STATUS_PLANNED):
         },
     }
 
-    response = requests.post(f"{NOTION_API}/pages", json=payload, headers=HEADERS)
+    response = _request("POST", f"{NOTION_API}/pages", wiederholbar=False, json=payload)
     if response.status_code == 200:
         data = response.json()
         print(f"   ✅ Seite '{title}' ({year}) aus Template erstellt.")
@@ -219,10 +261,10 @@ def set_week_status(page_id, status):
         print(f"   🧪 [DRY RUN] würde Status von {page_id} auf '{status}' setzen.")
         return True
 
-    response = requests.patch(
+    response = _request(
+        "PATCH",
         f"{NOTION_API}/pages/{page_id}",
         json={"properties": {"Status": {"status": {"name": status}}}},
-        headers=HEADERS,
     )
     if response.status_code != 200:
         print(f"   ⚠️ Status konnte nicht gesetzt werden: {response.text}")
@@ -334,7 +376,7 @@ def pruefe_filter_optionen():
     „Vorläufiges Mitglied" → „Probemitglied" passiert. Diese Prüfung macht so
     etwas sofort sichtbar, statt es einen Auslosungslauf lang zu verschlucken.
     """
-    response = requests.get(f"{NOTION_API}/data_sources/{DS_A_ID}", headers=HEADERS)
+    response = _request("GET", f"{NOTION_API}/data_sources/{DS_A_ID}")
     if response.status_code != 200:
         # Die Prüfung selbst darf den Lauf nicht aufhalten.
         print(f"   ⚠️ Schema der Mitgliederliste nicht lesbar: {response.text}")
